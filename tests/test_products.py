@@ -24,10 +24,9 @@ def test_sensor_parsing():
 
 def test_stm_band_names():
     p = LandsatS2STM(year=2024, percentiles=[0.9, 0.025], sensors=["L8"],
-                     bands=["red", "nir"], indices=["NDVI"])
+                     bands=["red", "nir"])
     assert percentile_label(0.025) == "p2.5"
-    assert p.band_names == ["p90_red", "p90_nir", "p90_ndvi",
-                            "p2.5_red", "p2.5_nir", "p2.5_ndvi"]
+    assert p.band_names == ["p90_red", "p90_nir", "p2.5_red", "p2.5_nir"]
     assert p.encoding.dtype == "int16"
 
 
@@ -35,7 +34,7 @@ def test_stm_validation():
     with pytest.raises(ValueError):
         LandsatS2STM(year=2024, percentiles=[50])
     with pytest.raises(ValueError):
-        LandsatS2STM(year=2024, indices=["foo"])
+        LandsatS2STM(year=2024, bands=["foo"])
     with pytest.warns(UserWarning):
         LandsatS2STM(year=2024, sensors=["L8", "S2"])
 

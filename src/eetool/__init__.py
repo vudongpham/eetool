@@ -27,7 +27,6 @@ from .core import (
 )
 from .products import (
     COMMON_BANDS,
-    INDICES,
     AnnualEmbedding,
     LandsatS2STM,
     S1Composite,
@@ -59,7 +58,7 @@ def initialize(project: str | None = None, high_volume: bool = True, **kwargs) -
 
 
 __all__ = [
-    "COMMON_BANDS", "DOWNLOAD_OPTIONS", "INDICES", "AnnualEmbedding", "Encoding", "Grid",
+    "COMMON_BANDS", "DOWNLOAD_OPTIONS", "AnnualEmbedding", "Encoding", "Grid",
     "LandsatS2STM", "Product", "RasterResult", "S1Composite", "__version__",
     "dequantize_embedding", "dequantize_s1", "download", "ee_download_annual_embedding",
     "ee_download_landsat_s2_stm", "ee_download_s1_composite", "get_product", "initialize",
