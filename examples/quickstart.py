@@ -8,12 +8,12 @@ eetool.initialize(project="my-gcp-project")  # high-volume endpoint by default
 
 ref = "reference.tif"  # any raster in a projected CRS; defines extent + CRS
 
-# 1) Landsat 8/9 percentiles + NDVI, 30 m, in memory -> GeoTIFF
+# 1) Landsat 8/9 percentiles, 30 m, in memory -> GeoTIFF
 stm = ee_download_landsat_s2_stm(
     ref, start_date="2023-01-01", end_date="2026-01-01",
-    percentiles=[0.1, 0.5, 0.75], sensors=["L8", "L9"], indices=["ndvi"],
+    percentiles=[0.1, 0.5, 0.75], sensors=["L8", "L9"],
 )
-print(stm)                      # RasterResult(shape=(21, H, W), dtype=int16, ...)
+print(stm)                      # RasterResult(shape=(18, H, W), dtype=int16, ...)
 print(stm.band_names[:3])       # ['p10_blue', 'p10_green', 'p10_red']
 stm.to_raster("landsat_stm_2023_2025.tif")
 
