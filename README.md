@@ -21,12 +21,31 @@ georeference it.
 pip install --upgrade --force-reinstall git+https://github.com/vudongpham/eetool.git
 ```
 
-This also replaces an eetool that is already installed. To update only eetool
-and leave its dependencies (numpy, rasterio, earthengine-api) as they are:
+This also replaces an eetool that is already installed, and installs its
+dependencies: numpy, rasterio, earthengine-api and pyogrio (for vector
+references).
+
+In a conda environment, install the geospatial libraries from conda-forge
+first, then eetool:
+
+```bash
+conda install -c conda-forge rasterio pyogrio earthengine-api
+```
+
+```bash
+pip install --upgrade --force-reinstall git+https://github.com/vudongpham/eetool.git
+```
+
+To update only eetool and leave the installed dependencies as they are, add
+`--no-deps`. **This skips dependencies that a new version adds**, so use it only
+when they are already installed:
 
 ```bash
 pip install --upgrade --force-reinstall --no-deps git+https://github.com/vudongpham/eetool.git
 ```
+
+Vector files are read with pyogrio; if it is missing, eetool falls back to
+fiona or GDAL's `osgeo` when one of them is installed.
 
 ## Quick start
 
