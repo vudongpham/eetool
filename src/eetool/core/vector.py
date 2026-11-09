@@ -5,7 +5,10 @@ Only the extent (xmin, ymin, xmax, ymax), the CRS and the feature count are
 needed, so no geometry library is required for the two most common formats:
 
 - GeoPackage (``.gpkg``) is an SQLite database: read with Python's own
-  ``sqlite3`` (R-tree index, else the geometry blobs).
+  ``sqlite3``. The extent comes from the geometries themselves (their
+  envelope headers, else their WKB vertices), never from the R-tree index:
+  the R-tree stores 32-bit floats rounded outward, which can be off by
+  metres and add a pixel to the grid.
 - Shapefile (``.shp``): the extent is in the ``.shp`` header, the CRS in the
   ``.prj`` file, the feature count in the ``.shx`` file.
 
@@ -144,7 +147,7 @@ def gpkg_blob_bounds(blob):
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def _info_gpkg_builtin(path, layer=None, use_rtree=True) -> VectorInfo:
+def _info_gpkg_builtin(path, layer=None) -> VectorInfo:
     uri = Path(path).resolve().as_uri() + "?mode=ro"
     con = sqlite3.connect(uri, uri=True)
     try:
@@ -153,26 +156,18 @@ def _info_gpkg_builtin(path, layer=None, use_rtree=True) -> VectorInfo:
         n = con.execute(f"SELECT count(*) FROM {_quote(table)}").fetchone()[0]
         if n == 0:
             return crs, None, 0
-        bounds = None
-        if use_rtree:
-            try:
-                row = con.execute(
-                    f"SELECT min(minx), min(miny), max(maxx), max(maxy) "
-                    f"FROM {_quote(f'rtree_{table}_{column}')}").fetchone()
-                if row and None not in row:
-                    bounds = tuple(float(v) for v in row)
-            except sqlite3.Error:  # no spatial index, or no R-tree module
-                bounds = None
-        if bounds is None:
-            xmin = ymin = math.inf
-            xmax = ymax = -math.inf
-            for (blob,) in con.execute(f"SELECT {_quote(column)} FROM {_quote(table)}"):
-                b = gpkg_blob_bounds(blob)
-                if b is None:
-                    continue
-                xmin, ymin = min(xmin, b[0]), min(ymin, b[1])
-                xmax, ymax = max(xmax, b[2]), max(ymax, b[3])
-            bounds = None if xmin == math.inf else (xmin, ymin, xmax, ymax)
+        # Exact extent from the geometries (float64). The R-tree index is not
+        # used: it holds float32 values rounded outward (off by up to ~0.5 m
+        # for coordinates in the millions).
+        xmin = ymin = math.inf
+        xmax = ymax = -math.inf
+        for (blob,) in con.execute(f"SELECT {_quote(column)} FROM {_quote(table)}"):
+            b = gpkg_blob_bounds(blob)
+            if b is None:
+                continue
+            xmin, ymin = min(xmin, b[0]), min(ymin, b[1])
+            xmax, ymax = max(xmax, b[2]), max(ymax, b[3])
+        bounds = None if xmin == math.inf else (xmin, ymin, xmax, ymax)
         return crs, bounds, n
     finally:
         con.close()
