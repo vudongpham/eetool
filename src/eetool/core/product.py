@@ -48,7 +48,7 @@ from .grid import Grid, Tile
 
 
 class Product(ABC):
-    #: registry key, used by ``eetool.download("<name>", ...)``
+    #: registry key, used by ``eetool.get("<name>", ...)``
     name: ClassVar[str] = ""
     #: pixel size used when the caller passes ``res=None`` and the
     #: reference is a raster path (``None`` -> the reference's own pixel size)

@@ -1,7 +1,8 @@
 # eetool
 
-Get Google Earth Engine data as **numpy arrays** on the exact pixel grid of a
-reference raster (same extent and CRS, pixel size of your choice).
+Get Google Earth Engine data as **numpy arrays** on the pixel grid of a
+reference: a raster (same extent, CRS and pixel size) or a vector file
+(extent of its features, pixel size of your choice).
 
 Every function returns the same thing: a 4-D array shaped
 **`(time, height, width, channel)`**, plus the grid (CRS, transform) needed to
@@ -9,10 +10,10 @@ georeference it.
 
 | Function | time axis | channel axis |
 |---|---|---|
-| `ee_download_landsat_s2_te` | one step per `time_step` days | spectral bands |
-| `ee_download_s1_composite` | one step per `window_days` days | polarisations |
-| `ee_download_landsat_s2_stm` | one per percentile (`p10`, `p50`, ...) | spectral bands |
-| `ee_download_annual_embedding` | 1 (the year) | `A00` ... `A63` |
+| `ee_get_landsat_s2_te` | one step per `time_step` days | spectral bands |
+| `ee_get_s1_composite` | one step per `window_days` days | polarisations |
+| `ee_get_landsat_s2_stm` | one per percentile (`p10`, `p50`, ...) | spectral bands |
+| `ee_get_annual_embedding` | 1 (the year) | `A00` ... `A63` |
 
 ## Install
 
@@ -31,15 +32,15 @@ pip install --upgrade --force-reinstall --no-deps git+https://github.com/vudongp
 
 ```python
 import eetool
-from eetool import (ee_download_landsat_s2_stm, ee_download_landsat_s2_te,
-                    ee_download_annual_embedding, ee_download_s1_composite)
+from eetool import (ee_get_landsat_s2_stm, ee_get_landsat_s2_te,
+                    ee_get_annual_embedding, ee_get_s1_composite)
 
 eetool.initialize(project="my-gcp-project")
 
-ref = "reference.tif"   # must be in a projected CRS (metres)
+ref = "reference.tif"   # or a vector: "aoi.gpkg", "fields.shp", ... (see "Reference")
 
 # Landsat 8/9 weekly mean composites for 2015
-te = ee_download_landsat_s2_te(ref, start_date="20150101", end_date="20151231",
+te = ee_get_landsat_s2_te(ref, start_date="20150101", end_date="20151231",
                                time_step=7, sensors=["L8", "L9"])
 te.data.shape        # (53, H, W, 6)   int16, NoData = -9999
 te.times             # ['2015-01-01', '2015-01-08', ...]
@@ -47,17 +48,17 @@ te.channels          # ['blue', 'green', 'red', 'nir', 'swir1', 'swir2']
 x = te.decode()      # float32 reflectance, NaN where there is no clear observation
 
 # Landsat 8/9 percentiles for 2024
-stm = ee_download_landsat_s2_stm(ref, "20240101", "20241231",
+stm = ee_get_landsat_s2_stm(ref, "20240101", "20241231",
                                  percentiles=[0.1, 0.5, 0.9], sensors=["L8", "L9"])
 stm.data.shape       # (3, H, W, 6)    one time step per percentile
 stm.times            # ['p10', 'p50', 'p90']
 
 # Satellite Embedding for 2024
-emb = ee_download_annual_embedding(ref, year=2024)
+emb = ee_get_annual_embedding(ref, year=2024)
 emb.data.shape       # (1, H, W, 64)
 
 # Sentinel-1 VV + VH, 10-day means
-s1 = ee_download_s1_composite(ref, "20240101", "20241231",
+s1 = ee_get_s1_composite(ref, "20240101", "20241231",
                               polarizations=["VV", "VH"], window_days=10)
 s1.data.shape        # (37, H, W, 2)
 ```
@@ -118,7 +119,7 @@ res.to_raster("te.tif", layout="per_time")    # -> ["te_2015-01-01.tif", ...]
 
 # or stream straight to disk while downloading, without holding the whole
 # array in memory (use this for large areas or long time series)
-ee_download_landsat_s2_te(ref, "20150101", "20151231", time_step=7,
+ee_get_landsat_s2_te(ref, "20150101", "20151231", time_step=7,
                           sensors=["L8", "L9"], path_out="te.tif", layout="per_time")
 
 back = eetool.read_raster("te.tif")                          # stacked file
@@ -132,8 +133,8 @@ For a real 4-D file format, use `res.to_xarray()` and then `.to_zarr()` or `.to_
 
 | Argument | Default | Meaning |
 |---|---|---|
-| `raster_ref_image` | required | Reference raster path, or an `eetool.Grid` |
-| `res` | `None` | Pixel size in metres. `None` = 30 for Landsat/S2, 10 for embedding and S1 |
+| `reference` | required | Raster or vector path, a GeoDataFrame, or an `eetool.Grid` (see below) |
+| `res` | `None` | Pixel size in CRS units (metres). `None` = 30 for Landsat/S2, 10 for embedding and S1 |
 | `path_out` | `None` | `None` = return a `RasterResult`. A path = stream to GeoTIFF(s) and return the path(s) |
 | `layout` | `"stack"` | File layout when `path_out` is given: `"stack"` or `"per_time"` |
 | `tile_size` | `None` | Tile width/height in pixels per request (`None` = 256) |
@@ -141,14 +142,39 @@ For a real 4-D file format, use `res.to_xarray()` and then `.to_zarr()` or `.to_
 | `max_retries` | `5` | Retries per tile when Earth Engine fails |
 | `verbose` | `True` | Print scene counts and progress |
 
-## `ee_download_landsat_s2_stm`
+### Reference: raster or vector
+
+| `reference` | Extent | CRS | Pixel size |
+|---|---|---|---|
+| Raster file (`.tif`, `.vrt`, ...) | the raster's | the raster's | `res`, or the product default |
+| Vector file (`.gpkg`, `.shp`, `.geojson`, `.fgb`, `.parquet`, ...) | the extent (xmin, ymin, xmax, ymax) of all features | the vector's; lon/lat vectors go to the UTM zone of their centre | `res`, or the product default |
+| GeoDataFrame / GeoSeries | same as a vector file | same as a vector file | same as a vector file |
+| `eetool.Grid` | the grid's | the grid's | the grid's |
+
+```python
+ee_get_landsat_s2_te("aoi.gpkg", "20150101", "20151231", time_step=7, sensors=["L8", "L9"])
+ee_get_s1_composite(gdf, "20240101", "20241231", res=20)          # a GeoDataFrame
+
+# more control: a specific layer, CRS, or snapping the extent to multiples of res
+grid = eetool.Grid.from_vector("data.gpkg", res=30, layer="fields", crs="EPSG:3035")
+ee_get_annual_embedding(grid, year=2024)
+```
+
+The output is clipped to the extent of the features: its upper-left corner is
+exactly (xmin, ymax), and the width and height are `(xmax - xmin) / res` and
+`(ymax - ymin) / res`, rounded up to whole pixels. If the extent is not a
+multiple of `res`, the last column and row reach less than one pixel past
+xmax and ymin. Every pixel inside the extent gets data; the polygon shapes are
+not used for masking.
+
+## `ee_get_landsat_s2_stm`
 
 Cloud-masked percentile composite of surface reflectance. Scenes from all
 selected sensors are pooled before the percentiles are computed.
 
 ```python
-ee_download_landsat_s2_stm(
-    raster_ref_image,
+ee_get_landsat_s2_stm(
+    reference,
     start_date,
     end_date,
     percentiles=(0.5,),
@@ -178,16 +204,16 @@ ee_download_landsat_s2_stm(
 NoData = -9999. The time axis holds the percentiles in the order given
 (`res.times == ['p10', 'p25', 'p50', 'p75']`), the channel axis the bands.
 
-## `ee_download_landsat_s2_te`
+## `ee_get_landsat_s2_te`
 
 Temporal encoding: a regular time series of cloud-masked composites, one per
 `time_step` days. Uses the same scenes, cloud masking and options as
-`ee_download_landsat_s2_stm`, but instead of percentiles over the whole
+`ee_get_landsat_s2_stm`, but instead of percentiles over the whole
 period it combines the clear observations inside each time step.
 
 ```python
-ee_download_landsat_s2_te(
-    raster_ref_image,
+ee_get_landsat_s2_te(
+    reference,
     start_date,
     end_date,
     time_step=7,
@@ -207,7 +233,7 @@ ee_download_landsat_s2_te(
 |---|---|
 | `time_step` | Length of each step in days. Steps start at `start_date`; the last one stops at `end_date` and can be shorter |
 | `reducer` | How clear observations inside a step are combined: `"mean"`, `"median"`, `"min"` or `"max"` |
-| others | Same as `ee_download_landsat_s2_stm` |
+| others | Same as `ee_get_landsat_s2_stm` |
 
 A pixel gets NoData (-9999) in a step when it has no clear observation there:
 it was cloudy, shadowed, snow-covered or saturated in every scene, or there
@@ -217,17 +243,17 @@ was no scene at all in that step (then the whole step is NoData).
 NoData = -9999. `res.times` holds the first day of each step.
 
 ```python
-res = ee_download_landsat_s2_te(ref, "20150101", "20151231", time_step=7,
+res = ee_get_landsat_s2_te(ref, "20150101", "20151231", time_step=7,
                                 sensors=["L8", "L9"], bands=["red", "nir"])
 x = res.decode()                      # (53, H, W, 2) float32, NaN = no data
 ndvi = (x[..., 1] - x[..., 0]) / (x[..., 1] + x[..., 0])   # (53, H, W)
 ```
 
-## `ee_download_annual_embedding`
+## `ee_get_annual_embedding`
 
 ```python
-ee_download_annual_embedding(
-    raster_ref_image,
+ee_get_annual_embedding(
+    reference,
     year,
     bands=None,
     res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, verbose=True,
@@ -243,14 +269,14 @@ ee_download_annual_embedding(
 `res.decode()` or `eetool.dequantize_embedding(array)` gives float values
 back. All 64 bands take 128 bytes per pixel, so use `path_out` for large areas.
 
-## `ee_download_s1_composite`
+## `ee_get_s1_composite`
 
 Sentinel-1 GRD (IW mode) backscatter in dB, one band per polarisation and
 time window.
 
 ```python
-ee_download_s1_composite(
-    raster_ref_image,
+ee_get_s1_composite(
+    reference,
     start_date,
     end_date,
     polarizations=("VV",),
@@ -287,12 +313,12 @@ window and `res.channels` the polarisations. `res.decode()` gives dB.
 ```python
 # Use a bounding box instead of a reference raster
 grid = eetool.Grid.from_bounds((500000, 4990000, 520000, 5000000), "EPSG:32633", res=20)
-s1 = ee_download_s1_composite(grid, "20240101", "20241231")
+s1 = ee_get_s1_composite(grid, "20240101", "20241231")
 
 # Call any product by name
 eetool.list_products()   # ['annual_embedding', 'landsat_s2_stm', 'landsat_s2_te', 's1_composite']
-emb = eetool.download("annual_embedding", ref, year=2023)
+emb = eetool.get("annual_embedding", ref, year=2023)
 ```
 
 `eetool.initialize(project=...)` runs `ee.Initialize` with the high-volume
-endpoint, which is recommended when downloading tiles in parallel.
+endpoint, which is recommended when requesting tiles in parallel.

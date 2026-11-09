@@ -84,3 +84,4 @@ def test_periods():
         resolve_period("2024/01/01", "20241231")
     with pytest.raises(ValueError):
         resolve_period("20240101", None)
+

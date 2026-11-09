@@ -80,8 +80,8 @@ class AnnualEmbedding(Product):
             print(f"[eetool] {n} embedding image(s) for {self.year}")
 
 
-def ee_download_annual_embedding(
-    raster_ref_image: GridLike,
+def ee_get_annual_embedding(
+    reference: GridLike,
     year: int,
     bands: Sequence[str] | None = None,
     *,
@@ -98,15 +98,17 @@ def ee_download_annual_embedding(
 
     Parameters
     ----------
-    raster_ref_image : str | Path | eetool.Grid
-        Reference raster (extent + CRS define the grid) or an :class:`eetool.Grid`.
+    reference : str | Path | GeoDataFrame | eetool.Grid
+        Defines the output grid: a raster file (its extent and CRS), a vector
+        file (``.gpkg``, ``.shp``, ``.geojson``, ...; the extent of all its
+        features), a GeoDataFrame / GeoSeries, or an :class:`eetool.Grid`.
     year : int
         Embedding year.
     bands : sequence of str, optional
         Subset of ``A00`` .. ``A63`` (default: all 64).
     res, path_out, layout, tile_size, n_workers, max_retries, verbose
         Options shared by all eetool functions (default res: 10 m);
-        see :func:`eetool.download`.
+        see :func:`eetool.get`.
 
     Returns
     -------
@@ -117,6 +119,6 @@ def ee_download_annual_embedding(
         ``result.decode()`` -> float32 in [-1, 1]. Otherwise the GeoTIFF path(s).
     """
     product = AnnualEmbedding(year=year, bands=bands)
-    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+    return run(product, reference, res=res, path_out=path_out, layout=layout,
                tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
                verbose=verbose)
