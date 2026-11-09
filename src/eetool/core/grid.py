@@ -9,7 +9,8 @@ A reference can be:
 - a raster file (``.tif``, ``.vrt``, ...): its extent and CRS; ``res=None``
   keeps its pixel size;
 - a vector file (``.gpkg``, ``.shp``, ``.geojson``, ``.fgb``, ...): the extent
-  of all its features, snapped outward to multiples of ``res``;
+  (xmin, ymin, xmax, ymax) of all its features; the grid starts exactly at
+  (xmin, ymax);
 - a GeoDataFrame / GeoSeries (anything with ``total_bounds`` and ``crs``);
 - a ready-made :class:`Grid`.
 
@@ -101,10 +102,13 @@ class Grid:
         return cls.from_bounds(bounds, crs, res)
 
     @classmethod
-    def from_vector(cls, source, res: float, crs=None, layer=None, snap: bool = True) -> "Grid":
+    def from_vector(cls, source, res: float, crs=None, layer=None, snap: bool = False) -> "Grid":
         """
-        Grid covering all features of a vector file (``.gpkg``, ``.shp``,
-        ``.geojson``, ...) or of a GeoDataFrame / GeoSeries.
+        Grid clipped to the extent (xmin, ymin, xmax, ymax) of all features of
+        a vector file (``.gpkg``, ``.shp``, ``.geojson``, ...) or of a
+        GeoDataFrame / GeoSeries. The upper-left pixel corner is exactly
+        (xmin, ymax); the width/height are rounded up to whole pixels, so the
+        last column/row can reach up to one pixel past xmax / below ymin.
 
         Parameters
         ----------
@@ -118,8 +122,8 @@ class Grid:
         layer : str | int, optional
             Layer of a multi-layer file (e.g. a GeoPackage); default the first.
         snap : bool
-            Snap the extent outward to multiples of ``res`` so grids built from
-            different vectors line up.
+            Default False. True = snap the extent outward to multiples of
+            ``res`` so grids built from different vectors line up.
         """
         if res is None or res <= 0:
             raise ValueError("A vector reference needs a pixel size: pass `res` (e.g. res=30)")

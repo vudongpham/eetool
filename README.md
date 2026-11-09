@@ -147,7 +147,7 @@ For a real 4-D file format, use `res.to_xarray()` and then `.to_zarr()` or `.to_
 | `reference` | Extent | CRS | Pixel size |
 |---|---|---|---|
 | Raster file (`.tif`, `.vrt`, ...) | the raster's | the raster's | `res`, or the product default |
-| Vector file (`.gpkg`, `.shp`, `.geojson`, `.fgb`, `.parquet`, ...) | all features, snapped outward to multiples of `res` | the vector's; lon/lat vectors go to the UTM zone of their centre | `res`, or the product default |
+| Vector file (`.gpkg`, `.shp`, `.geojson`, `.fgb`, `.parquet`, ...) | the extent (xmin, ymin, xmax, ymax) of all features | the vector's; lon/lat vectors go to the UTM zone of their centre | `res`, or the product default |
 | GeoDataFrame / GeoSeries | same as a vector file | same as a vector file | same as a vector file |
 | `eetool.Grid` | the grid's | the grid's | the grid's |
 
@@ -155,13 +155,17 @@ For a real 4-D file format, use `res.to_xarray()` and then `.to_zarr()` or `.to_
 ee_get_landsat_s2_te("aoi.gpkg", "20150101", "20151231", time_step=7, sensors=["L8", "L9"])
 ee_get_s1_composite(gdf, "20240101", "20241231", res=20)          # a GeoDataFrame
 
-# more control: a specific layer, CRS or no snapping
+# more control: a specific layer, CRS, or snapping the extent to multiples of res
 grid = eetool.Grid.from_vector("data.gpkg", res=30, layer="fields", crs="EPSG:3035")
 ee_get_annual_embedding(grid, year=2024)
 ```
 
-The output always covers the full rectangle around the features. Pixels
-outside the polygons are not masked.
+The output is clipped to the extent of the features: its upper-left corner is
+exactly (xmin, ymax), and the width and height are `(xmax - xmin) / res` and
+`(ymax - ymin) / res`, rounded up to whole pixels. If the extent is not a
+multiple of `res`, the last column and row reach less than one pixel past
+xmax and ymin. Every pixel inside the extent gets data; the polygon shapes are
+not used for masking.
 
 ## `ee_get_landsat_s2_stm`
 

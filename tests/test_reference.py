@@ -17,15 +17,19 @@ def aoi():
                                       shapely.Point(509990, 4999990)], crs="EPSG:32633")
 
 
-def test_vector_gpkg_snapped(aoi, tmp_path):
+def test_vector_gpkg_clipped_to_extent(aoi, tmp_path):
     path = tmp_path / "aoi.gpkg"
     aoi.to_file(path)
     assert reference_kind(path) == "vector"
     g = resolve_grid(path, 30)
     assert g.crs.to_epsg() == 32633
-    assert g.bounds == (500100, 4990050, 510000, 5000010)   # snapped out to 30 m
-    assert (g.width, g.height) == (330, 332)
-    assert g.x_ul % 30 == 0 and g.y_ul % 30 == 0
+    # extent: xmin=500100, ymin=4990050, xmax=509990, ymax=4999990
+    assert (g.x_ul, g.y_ul) == (500100, 4999990)            # starts exactly at the extent
+    assert (g.width, g.height) == (330, 332)                # ceil(9890/30), ceil(9940/30)
+    left, bottom, right, top = g.bounds
+    assert 509990 <= right < 509990 + 30 and 4990050 - 30 < bottom <= 4990050
+    snapped = Grid.from_vector(path, 30, snap=True)
+    assert snapped.bounds == (500100, 4990050, 510000, 5000010)
 
 
 def test_vector_geodataframe_and_explicit_crs(aoi):
@@ -85,5 +89,5 @@ def test_run_with_vector_reference(aoi, tmp_path, monkeypatch):
     aoi.to_file(path)
     res = run(One(), path, verbose=False)            # res=None -> product default 100 m
     assert res.shape == (2, 100, 99, 1) and res.grid.res == 100   # (time, H, W, channel)
-    assert res.transform.c == 500100 and res.transform.f == 5000000
+    assert res.transform.c == 500100 and res.transform.f == 4999990
     assert (res.data == 1).all()
