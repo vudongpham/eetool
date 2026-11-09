@@ -174,10 +174,37 @@ def test_gpkg_builtin_matches_pyogrio(tmp_path):
     gdf.to_file(path, layer="mixed")
     gdf.iloc[:1].to_file(path, layer="other", mode="a")
     ref = pyogrio.read_info(path, layer="mixed", force_total_bounds=True)
-    for use_rtree in (True, False):        # R-tree index, or parsing every geometry
-        crs, bounds, n = _info_gpkg_builtin(path, "mixed", use_rtree=use_rtree)
-        assert crs == "EPSG:3035" and n == 4
-        assert bounds == pytest.approx(tuple(ref["total_bounds"]))
+    crs, bounds, n = _info_gpkg_builtin(path, "mixed")
+    assert crs == "EPSG:3035" and n == 4
+    assert bounds == pytest.approx(tuple(ref["total_bounds"]))
     assert _info_gpkg_builtin(path, "other")[1] == (3, 4, 3, 4)
     with pytest.raises(ValueError, match="layers"):
         _info_gpkg_builtin(path, "nope")
+
+
+def test_gpkg_extent_is_exact_not_rtree(tmp_path, monkeypatch):
+    """A 30 km EPSG:3035 tile with float noise (like a FORCE / QGIS grid tile)
+    must give exactly 1000 x 1000 pixels at 30 m; the R-tree's float32 values
+    are ~0.5 m too large and used to give 1001 x 1001."""
+    x0, y0 = 4526026.363052994, 3404919.607708866
+    x1, y1 = 4556026.363054758, 3434919.607714256      # 30 km + ~2e-6 m noise
+    tile = gpd.GeoDataFrame(geometry=[shapely.box(x0, y0, x1, y1)], crs="EPSG:3035")
+    path = tmp_path / "tile.gpkg"
+    tile.to_file(path)
+    _block_imports(monkeypatch, "pyogrio", "fiona", "osgeo")   # built-in reader
+    g = resolve_grid(path, 30)
+    assert (g.height, g.width) == (1000, 1000)
+    assert (g.x_ul, g.y_ul) == (x0, y1)                         # exact corner
+    assert resolve_grid(path, 10).shape == (3000, 3000)
+    assert resolve_grid(path, 20).shape == (1500, 1500)
+
+
+def test_pixel_count_tolerance():
+    from eetool.core.grid import n_pixels
+
+    assert n_pixels(30000.0, 30) == 1000
+    assert n_pixels(30000.00001, 30) == 1000           # float noise
+    assert n_pixels(30000.02, 30) == 1000              # < 0.001 px over
+    assert n_pixels(30000.1, 30) == 1001               # a real partial pixel
+    assert n_pixels(29999.9, 30) == 1000
+    assert n_pixels(1e-9, 30) == 1                      # never zero

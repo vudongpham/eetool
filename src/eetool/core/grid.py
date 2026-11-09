@@ -36,6 +36,16 @@ from rasterio.warp import transform_bounds
 VECTOR_EXTENSIONS = {".gpkg", ".shp", ".geojson", ".json", ".fgb", ".gml", ".kml",
                      ".kmz", ".gdb", ".parquet", ".geoparquet", ".tab", ".mif", ".sqlite",
                      ".gpx", ".dxf", ".csv", ".zip"}
+#: extents within this fraction of a pixel of a whole number of pixels are
+#: treated as that whole number (absorbs float noise in coordinates)
+PIXEL_TOLERANCE = 1e-3
+
+
+def n_pixels(length: float, res: float) -> int:
+    """Number of pixels of size ``res`` covering ``length`` (rounded up, with tolerance)."""
+    return max(1, int(np.ceil(length / res - PIXEL_TOLERANCE)))
+
+
 RASTER_EXTENSIONS = {".tif", ".tiff", ".vrt", ".img", ".jp2", ".nc", ".hdf", ".h5",
                      ".asc", ".dem", ".bil", ".png", ".jpg", ".jpeg"}
 
@@ -66,7 +76,9 @@ class Grid:
         """
         Grid anchored at the upper-left corner of ``bounds``
         (left, bottom, right, top) with square pixels of size ``res``
-        (CRS units). The extent is rounded *up* to whole pixels.
+        (CRS units). The extent is rounded *up* to whole pixels, ignoring
+        floating-point noise of up to ``PIXEL_TOLERANCE`` pixel (so a
+        30000.000002 m wide extent at 30 m is 1000 pixels, not 1001).
         """
         crs = CRS.from_user_input(crs)
         left, bottom, right, top = (float(v) for v in bounds)
@@ -79,8 +91,8 @@ class Grid:
                 f"The CRS is geographic (degrees) but res={res} looks like metres. "
                 "Reproject the reference to a projected CRS, or pass res in degrees."
             )
-        width = int(np.ceil((right - left) / res - 1e-6))
-        height = int(np.ceil((top - bottom) / res - 1e-6))
+        width = n_pixels(right - left, res)
+        height = n_pixels(top - bottom, res)
         return cls(crs=crs, x_ul=left, y_ul=top, res=float(res),
                    width=width, height=height)
 
