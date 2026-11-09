@@ -91,3 +91,38 @@ def test_run_with_vector_reference(aoi, tmp_path, monkeypatch):
     assert res.shape == (2, 100, 99, 1) and res.grid.res == 100   # (time, H, W, channel)
     assert res.transform.c == 500100 and res.transform.f == 4999990
     assert (res.data == 1).all()
+
+
+def _block_imports(monkeypatch, *names):
+    """Make ``import name`` raise ImportError for each name."""
+    import builtins
+    import sys
+
+    real_import = builtins.__import__
+    for n in names:
+        monkeypatch.delitem(sys.modules, n, raising=False)
+
+    def fake_import(name, *args, **kwargs):
+        if name.split(".")[0] in names:
+            raise ImportError(f"No module named {name!r}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+
+def test_vector_falls_back_to_fiona(aoi, tmp_path, monkeypatch):
+    pytest.importorskip("fiona")
+    path = tmp_path / "aoi.gpkg"
+    aoi.to_file(path)
+    expected = resolve_grid(path, 30)
+    _block_imports(monkeypatch, "pyogrio")
+    assert resolve_grid(path, 30) == expected
+
+
+def test_vector_without_any_reader(aoi, tmp_path, monkeypatch):
+    path = tmp_path / "aoi.gpkg"
+    aoi.to_file(path)
+    _block_imports(monkeypatch, "pyogrio", "fiona", "osgeo")
+    with pytest.raises(ImportError, match="pip install pyogrio"):
+        resolve_grid(path, 30)
+    assert Grid.from_reference(aoi, 30).res == 30     # GeoDataFrames need no reader
