@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eetool"
-version = "0.1.0"
-description = "Download Google Earth Engine composites (Landsat/Sentinel-2 STMs, Satellite Embedding, Sentinel-1) onto your own pixel grid."
+version = "0.2.0"
+description = "Google Earth Engine data (Landsat/Sentinel-2, Satellite Embedding, Sentinel-1) as (time, H, W, channel) numpy arrays on your own pixel grid."
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "vudongpham" }]
@@ -18,7 +18,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "xarray"]
+xarray = ["xarray"]
 
 [project.urls]
 Homepage = "https://github.com/vudongpham/eetool"

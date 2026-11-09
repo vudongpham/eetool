@@ -1,7 +1,10 @@
 """
-Spectral-temporal metrics (per-pixel percentile composites) of Landsat
-4/5/7/8/9 Collection 2 Level-2 and/or Sentinel-2 L2A (harmonized; any
-platform A, B, C, D, ...) surface reflectance.
+Cloud-masked Landsat 4/5/7/8/9 Collection 2 Level-2 and/or Sentinel-2 L2A
+(harmonized; any platform A, B, C, D, ...) surface reflectance:
+
+- ``LandsatS2STM``: spectral-temporal metrics (per-pixel percentiles over the
+  whole period).
+- ``LandsatS2TE``: temporal encoding (one composite per ``time_step`` days).
 
 Storage: reflectance * 10000 as int16, NoData = -9999.
 """
@@ -10,11 +13,12 @@ from __future__ import annotations
 
 import re
 import warnings
+from datetime import timedelta
 from typing import Sequence
 
 import numpy as np
 
-from ..core import Encoding, Product, register, resolve_period, run
+from ..core import Encoding, Product, register, resolve_period, run, split_period
 from ..core.grid import GridLike
 
 COMMON_BANDS = ["blue", "green", "red", "nir", "swir1", "swir2"]
@@ -35,6 +39,7 @@ S2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 S2_CLOUD_SCORE = "GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED"
 
 ENCODING = Encoding.scaled(10000, dtype="int16", nodata=-9999)
+TE_REDUCERS = ("mean", "median", "min", "max")
 
 
 # ---------------------------------------------------------------------------
@@ -101,46 +106,30 @@ def _parse_bands(bands):
     return list(dict.fromkeys(bands))
 
 
-def _parse_months(months):
-    if months is None:
-        return None
-    months = sorted({int(m) for m in ([months] if isinstance(months, int) else months)})
-    if not months or months[0] < 1 or months[-1] > 12:
-        raise ValueError("months must be integers in 1..12")
-    return months
-
-
 # ---------------------------------------------------------------------------
 # Product
 # ---------------------------------------------------------------------------
-@register
-class LandsatS2STM(Product):
-    """Cloud-masked per-pixel percentiles of Landsat and/or Sentinel-2 SR."""
+class _LandsatS2Base(Product):
+    """Shared scene selection, cloud masking and scaling for Landsat / S2."""
 
-    name = "landsat_s2_stm"
     default_res = 30
     encoding = ENCODING
 
     def __init__(
         self,
-        year: int | None = None,
-        start_date=None,
-        end_date=None,
-        percentiles: Sequence[float] = (0.5,),
+        start_date,
+        end_date,
         sensors: Sequence[str] = ("L4", "L5", "L7", "L8", "L9"),
         bands: Sequence[str] | None = None,
-        months: Sequence[int] | None = None,
         max_scene_cloud: float | None = None,
         s2_nir: str = "B8A",
         s2_cs_threshold: float = 0.6,
         mask_snow: bool = True,
         resample: str | None = None,
     ):
-        self.period = resolve_period(year, start_date, end_date)
-        self.percentiles = normalize_percentiles(percentiles)
+        self.period = resolve_period(start_date, end_date)
         self.landsat_keys, self.s2_platforms = parse_sensors(sensors)
         self.bands = _parse_bands(bands)
-        self.months = _parse_months(months)
         if s2_nir not in ("B8A", "B8"):
             raise ValueError("s2_nir must be 'B8A' or 'B8'")
         if not 0 <= s2_cs_threshold <= 1:
@@ -157,12 +146,8 @@ class LandsatS2STM(Product):
             warnings.warn(
                 "Landsat and Sentinel-2 scenes are pooled into one stack without "
                 "spectral band adjustment (no HLS-style harmonisation).",
-                stacklevel=3,
+                stacklevel=4,
             )
-
-    @property
-    def band_names(self) -> list[str]:
-        return [f"{percentile_label(p)}_{b}" for p in self.percentiles for b in self.bands]
 
     def metadata(self) -> dict:
         sensors = list(self.landsat_keys)
@@ -171,9 +156,7 @@ class LandsatS2STM(Product):
         return {
             "sensors": ",".join(sensors),
             "start_date": self.period.start.isoformat(),
-            "end_date_exclusive": self.period.end.isoformat(),
-            "percentiles": ",".join(f"{p:g}" for p in self.percentiles),
-            "months": ",".join(map(str, self.months)) if self.months else "all",
+            "end_date": (self.period.end - timedelta(days=1)).isoformat(),
         }
 
     # -- collections -------------------------------------------------------
@@ -182,9 +165,6 @@ class LandsatS2STM(Product):
 
         coll = coll.filterBounds(region).filterDate(self.period.start.isoformat(),
                                                    self.period.end.isoformat())
-        if self.months:
-            coll = coll.filter(ee.Filter.Or(*[ee.Filter.calendarRange(m, m, "month")
-                                              for m in self.months]))
         if self.max_scene_cloud is not None:
             coll = coll.filter(ee.Filter.lte(cloud_property, self.max_scene_cloud))
         return coll
@@ -250,7 +230,60 @@ class LandsatS2STM(Product):
             merged = merged.merge(c)
         return merged.select(self.bands)
 
-    # -- product interface -------------------------------------------------
+    def scene_counts(self, region) -> dict:
+        """{sensor: number of scenes intersecting ``region`` in the period}."""
+        import ee
+
+        info = {}
+        if self.landsat_keys:
+            info["landsat"] = ee.Dictionary.fromLists(
+                self.landsat_keys, [self._raw_landsat(k, region).size() for k in self.landsat_keys])
+        if self.s2_platforms is not None:
+            info["s2"] = self._raw_s2(region).aggregate_histogram("SPACECRAFT_NAME")
+        info = ee.Dictionary(info).getInfo()
+        return {**info.get("landsat", {}), **info.get("s2", {})}
+
+    def prepare(self, grid, verbose=True):
+        if not verbose:
+            return
+        counts = self.scene_counts(grid.ee_geometry())
+        print("[eetool] scenes intersecting the extent: "
+              + (", ".join(f"{k}={v}" for k, v in counts.items()) or "none"))
+        missing = [p for p in (self.s2_platforms or []) if p not in counts]
+        if missing:
+            print(f"[eetool]   no scenes for: {', '.join(missing)}")
+
+    @staticmethod
+    def _empty(names):
+        """Fully masked image with the given band names (-> NoData everywhere)."""
+        import ee
+
+        return ee.Image.constant([0] * len(names)).rename(names).updateMask(ee.Image.constant(0))
+
+
+@register
+class LandsatS2STM(_LandsatS2Base):
+    """Cloud-masked per-pixel percentiles of Landsat and/or Sentinel-2 SR."""
+
+    name = "landsat_s2_stm"
+
+    def __init__(self, start_date, end_date, percentiles: Sequence[float] = (0.5,), **kwargs):
+        self.percentiles = normalize_percentiles(percentiles)
+        super().__init__(start_date, end_date, **kwargs)
+
+    @property
+    def times(self) -> list[str]:
+        """One step per percentile (``"p10"``, ``"p50"``, ...), in the order given."""
+        return [percentile_label(p) for p in self.percentiles]
+
+    @property
+    def channels(self) -> list[str]:
+        return list(self.bands)
+
+    def metadata(self) -> dict:
+        return {**super().metadata(),
+                "percentiles": ",".join(f"{p:g}" for p in self.percentiles)}
+
     def build_image(self, region):
         import ee
 
@@ -260,83 +293,80 @@ class LandsatS2STM(Product):
             [self.percentiles[i] * 100 for i in order],
             outputNames=[f"q{i}" for i in order],
         )
+        # time-major: all bands of percentile 0, then percentile 1, ...
         out = [f"{b}_q{i}" for i in range(len(self.percentiles)) for b in self.bands]
-        empty = (ee.Image.constant([0] * len(out)).rename(out)
-                 .updateMask(ee.Image.constant(0)))
         return ee.Image(ee.Algorithms.If(coll.size().gt(0),
-                                         coll.reduce(reducer).select(out), empty))
+                                         coll.reduce(reducer).select(out), self._empty(out)))
 
-    def prepare(self, grid, verbose=True):
-        if not verbose:
-            return
+
+@register
+class LandsatS2TE(_LandsatS2Base):
+    """
+    Temporal encoding: one cloud-masked composite of Landsat and/or
+    Sentinel-2 SR per ``time_step`` days. Steps without any clear
+    observation are NoData.
+    """
+
+    name = "landsat_s2_te"
+
+    def __init__(self, start_date, end_date, time_step: int = 7, reducer: str = "mean",
+                 **kwargs):
+        super().__init__(start_date, end_date, **kwargs)
+        if time_step is None or int(time_step) < 1:
+            raise ValueError("time_step must be an integer >= 1 (days)")
+        if reducer not in TE_REDUCERS:
+            raise ValueError(f"reducer must be one of {TE_REDUCERS}")
+        self.time_step = int(time_step)
+        self.reducer = reducer
+        self.windows = split_period(self.period, self.time_step)
+
+    @property
+    def times(self) -> list[str]:
+        """First day of every time step (ISO)."""
+        return [w.start.isoformat() for w in self.windows]
+
+    @property
+    def channels(self) -> list[str]:
+        return list(self.bands)
+
+    def metadata(self) -> dict:
+        return {**super().metadata(), "time_step_days": self.time_step,
+                "reducer": self.reducer, "n_steps": len(self.windows),
+}
+
+    def build_image(self, region):
         import ee
 
-        region = grid.ee_geometry()
-        info = {}
-        if self.landsat_keys:
-            info["landsat"] = ee.Dictionary.fromLists(
-                self.landsat_keys, [self._raw_landsat(k, region).size() for k in self.landsat_keys])
-        if self.s2_platforms is not None:
-            info["s2"] = self._raw_s2(region).aggregate_histogram("SPACECRAFT_NAME")
-        info = ee.Dictionary(info).getInfo()
-        counts = {**info.get("landsat", {}), **info.get("s2", {})}
-        print("[eetool] scenes intersecting the extent: "
-              + (", ".join(f"{k}={v}" for k, v in counts.items()) or "none"))
-        missing = [p for p in (self.s2_platforms or []) if p not in info.get("s2", {})]
-        if missing:
-            print(f"[eetool]   no scenes for: {', '.join(missing)}")
+        coll = self.collection(region)
+        steps = []
+        # time-major: all bands of step 0, then all bands of step 1, ...
+        for w, d in zip(self.windows, self.times):
+            sub = coll.filterDate(w.start.isoformat(), w.end.isoformat())
+            names = [f"{b}_{d}" for b in self.bands]
+            reduced = getattr(sub, self.reducer)().select(self.bands, names)
+            steps.append(ee.Image(ee.Algorithms.If(sub.size().gt(0), reduced,
+                                                   self._empty(names))))
+        return ee.Image.cat(steps)
+
+    def prepare(self, grid, verbose=True):
+        super().prepare(grid, verbose)
+        if verbose:
+            last = self.windows[-1]
+            print(f"[eetool] {len(self.windows)} time step(s) of {self.time_step} day(s) "
+                  f"x {len(self.bands)} band(s); last step {last.start} .. "
+                  f"{last.end - timedelta(days=1)} ({last.days} day(s))")
 
 
 # ---------------------------------------------------------------------------
-# Public function
+# Public functions
 # ---------------------------------------------------------------------------
-def ee_download_landsat_s2_stm(
-    raster_ref_image: GridLike,
-    year: int | None = None,
-    start_date=None,
-    end_date=None,
-    percentiles: Sequence[float] = (0.5,),
-    sensors: Sequence[str] = ("L4", "L5", "L7", "L8", "L9"),
-    bands: Sequence[str] | None = None,
-    months: Sequence[int] | None = None,
-    max_scene_cloud: float | None = None,
-    s2_nir: str = "B8A",
-    s2_cs_threshold: float = 0.6,
-    mask_snow: bool = True,
-    resample: str | None = None,
-    *,
-    res: float | None = None,
-    path_out=None,
-    tile_size: int | None = None,
-    n_workers: int = 4,
-    max_retries: int = 5,
-    verbose: bool = True,
-):
-    """
-    Cloud-masked per-pixel percentile composite (spectral-temporal metrics) of
-    Landsat and/or Sentinel-2 surface reflectance.
-
-    Parameters
-    ----------
-    raster_ref_image : str | Path | eetool.Grid
-        Reference raster (its upper-left corner, extent and CRS define the
-        output grid) or a ready-made :class:`eetool.Grid`.
-    year : int, optional
-        Shortcut for ``start_date=f"{year}-01-01", end_date=f"{year+1}-01-01"``.
-    start_date, end_date : str | datetime.date, optional
-        ISO dates; ``end_date`` is EXCLUSIVE.
-    percentiles : sequence of float
-        Fractions in [0, 1], e.g. ``[0.1, 0.5, 0.9]`` (0 / 1 = min / max).
-        Output keeps the order given.
-    sensors : sequence of str
+_COMMON_DOC = """    sensors : sequence of str
         Any mix of ``"L4"``, ``"L5"``, ``"L7"``, ``"L8"``, ``"L9"`` and
         Sentinel-2 platforms ``"S2A"``, ``"S2B"``, ``"S2C"``, ... (``"S2"`` = all).
         All scenes are pooled into one stack.
     bands : sequence of str, optional
         Subset of ``COMMON_BANDS`` (blue, green, red, nir, swir1, swir2);
         default all six.
-    months : sequence of int, optional
-        Keep only scenes acquired in these calendar months (e.g. ``[6, 7, 8]``).
     max_scene_cloud : float, optional
         Drop whole scenes whose cloud cover (%) exceeds this before pixel masking.
     s2_nir : {"B8A", "B8"}
@@ -348,23 +378,127 @@ def ee_download_landsat_s2_stm(
     resample : {None, "bilinear", "bicubic"}
         Resampling of optical bands when warping scenes to the grid
         (None = nearest neighbour).
-    res, path_out, tile_size, n_workers, max_retries, verbose
-        Download options, identical for every eetool function — see
-        :func:`eetool.download`.
+    res, path_out, layout, tile_size, n_workers, max_retries, verbose
+        Options shared by every eetool function — see :func:`eetool.download`."""
 
-    Returns
-    -------
-    RasterResult | str
-        ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
-        shape (n_percentiles * n_bands, H, W), int16 = reflectance * 10000,
-        NoData = -9999, bands named ``"p10_blue"``, ``"p10_green"``, ...
-        (percentile-major). Otherwise the GeoTIFF path.
-    """
+
+def ee_download_landsat_s2_stm(
+    raster_ref_image: GridLike,
+    start_date,
+    end_date,
+    percentiles: Sequence[float] = (0.5,),
+    sensors: Sequence[str] = ("L4", "L5", "L7", "L8", "L9"),
+    bands: Sequence[str] | None = None,
+    max_scene_cloud: float | None = None,
+    s2_nir: str = "B8A",
+    s2_cs_threshold: float = 0.6,
+    mask_snow: bool = True,
+    resample: str | None = None,
+    *,
+    res: float | None = None,
+    path_out=None,
+    layout: str = "stack",
+    tile_size: int | None = None,
+    n_workers: int = 4,
+    max_retries: int = 5,
+    verbose: bool = True,
+):
     product = LandsatS2STM(
-        year=year, start_date=start_date, end_date=end_date, percentiles=percentiles,
-        sensors=sensors, bands=bands, months=months,
+        start_date, end_date, percentiles=percentiles, sensors=sensors, bands=bands,
         max_scene_cloud=max_scene_cloud, s2_nir=s2_nir, s2_cs_threshold=s2_cs_threshold,
         mask_snow=mask_snow, resample=resample,
     )
-    return run(product, raster_ref_image, res=res, path_out=path_out, tile_size=tile_size,
-               n_workers=n_workers, max_retries=max_retries, verbose=verbose)
+    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+               tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
+               verbose=verbose)
+
+
+ee_download_landsat_s2_stm.__doc__ = """
+    Cloud-masked per-pixel percentile composite (spectral-temporal metrics) of
+    Landsat and/or Sentinel-2 surface reflectance.
+
+    Parameters
+    ----------
+    raster_ref_image : str | Path | eetool.Grid
+        Reference raster (its upper-left corner, extent and CRS define the
+        output grid) or a ready-made :class:`eetool.Grid`.
+    start_date, end_date : str | datetime.date
+        First and last day, BOTH INCLUSIVE: ``"20150101"`` / ``"2015-12-31"``.
+    percentiles : sequence of float
+        Fractions in [0, 1], e.g. ``[0.1, 0.5, 0.9]`` (0 / 1 = min / max).
+        Output keeps the order given.
+""" + _COMMON_DOC + """
+
+    Returns
+    -------
+    RasterResult | str | list[str]
+        ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
+        shape (n_percentiles, H, W, n_bands), int16 = reflectance * 10000,
+        NoData = -9999; ``result.times`` = percentile labels (``"p10"``, ...),
+        ``result.channels`` = bands. Otherwise the GeoTIFF path(s).
+"""
+
+
+def ee_download_landsat_s2_te(
+    raster_ref_image: GridLike,
+    start_date,
+    end_date,
+    time_step: int = 7,
+    sensors: Sequence[str] = ("L4", "L5", "L7", "L8", "L9"),
+    bands: Sequence[str] | None = None,
+    reducer: str = "mean",
+    max_scene_cloud: float | None = None,
+    s2_nir: str = "B8A",
+    s2_cs_threshold: float = 0.6,
+    mask_snow: bool = True,
+    resample: str | None = None,
+    *,
+    res: float | None = None,
+    path_out=None,
+    layout: str = "stack",
+    tile_size: int | None = None,
+    n_workers: int = 4,
+    max_retries: int = 5,
+    verbose: bool = True,
+):
+    product = LandsatS2TE(
+        start_date, end_date, time_step=time_step, reducer=reducer, sensors=sensors,
+        bands=bands, max_scene_cloud=max_scene_cloud, s2_nir=s2_nir,
+        s2_cs_threshold=s2_cs_threshold, mask_snow=mask_snow, resample=resample,
+    )
+    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+               tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
+               verbose=verbose)
+
+
+ee_download_landsat_s2_te.__doc__ = """
+    Temporal encoding: a regular time series of cloud-masked composites of
+    Landsat and/or Sentinel-2 surface reflectance, one per ``time_step`` days.
+
+    The period is cut into consecutive steps starting at ``start_date`` (the
+    last step is cut at ``end_date`` and may be shorter). Within each step all
+    clear observations are combined with ``reducer`` (default mean). Pixels
+    with no clear observation in a step — clouds, shadow, snow, saturation,
+    or no scene at all in that step — are NoData (-9999).
+
+    Parameters
+    ----------
+    raster_ref_image : str | Path | eetool.Grid
+        Reference raster (its upper-left corner, extent and CRS define the
+        output grid) or a ready-made :class:`eetool.Grid`.
+    start_date, end_date : str | datetime.date
+        First and last day, BOTH INCLUSIVE: ``"20150101"`` / ``"2015-12-31"``.
+    time_step : int
+        Length of each step in days (e.g. 7 = weekly composites).
+    reducer : {"mean", "median", "min", "max"}
+        How clear observations within a step are combined.
+""" + _COMMON_DOC + """
+
+    Returns
+    -------
+    RasterResult | str | list[str]
+        ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
+        shape (n_steps, H, W, n_bands), int16 = reflectance * 10000,
+        NoData = -9999; ``result.times`` = first day of each step,
+        ``result.channels`` = bands. Otherwise the GeoTIFF path(s).
+"""

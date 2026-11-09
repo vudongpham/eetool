@@ -49,7 +49,11 @@ class AnnualEmbedding(Product):
             self.bands = bands
 
     @property
-    def band_names(self) -> list[str]:
+    def times(self) -> list[str]:
+        return [str(self.year)]
+
+    @property
+    def channels(self) -> list[str]:
         return list(self.bands)
 
     def metadata(self) -> dict:
@@ -83,6 +87,7 @@ def ee_download_annual_embedding(
     *,
     res: float | None = None,
     path_out=None,
+    layout: str = "stack",
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
@@ -99,17 +104,19 @@ def ee_download_annual_embedding(
         Embedding year.
     bands : sequence of str, optional
         Subset of ``A00`` .. ``A63`` (default: all 64).
-    res, path_out, tile_size, n_workers, max_retries, verbose
-        Download options shared by all eetool functions (default res: 10 m);
+    res, path_out, layout, tile_size, n_workers, max_retries, verbose
+        Options shared by all eetool functions (default res: 10 m);
         see :func:`eetool.download`.
 
     Returns
     -------
-    RasterResult | str
-        ``path_out is None`` -> :class:`eetool.RasterResult` (64, H, W) uint16
-        (128 bytes per pixel — stream large areas with ``path_out``);
-        otherwise the GeoTIFF path. ``result.decode()`` -> float32 in [-1, 1].
+    RasterResult | str | list[str]
+        ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
+        shape (1, H, W, n_bands) uint16 (time = the year; 128 bytes per pixel
+        for all 64 bands — stream large areas with ``path_out``).
+        ``result.decode()`` -> float32 in [-1, 1]. Otherwise the GeoTIFF path(s).
     """
     product = AnnualEmbedding(year=year, bands=bands)
-    return run(product, raster_ref_image, res=res, path_out=path_out, tile_size=tile_size,
-               n_workers=n_workers, max_retries=max_retries, verbose=verbose)
+    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+               tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
+               verbose=verbose)

@@ -1,6 +1,6 @@
 """
 Sentinel-1 GRD (COPERNICUS/S1_GRD, IW mode, backscatter in dB) composites
-over consecutive time windows, one band per polarisation and window.
+over consecutive time windows: (window, H, W, polarisation).
 
 Storage: uint16 linear mapping of ``db_range`` (default -40..10 dB) onto
 0..65534, NoData = 65535 (~0.0008 dB step). ``RasterResult.decode()`` or
@@ -9,6 +9,7 @@ Storage: uint16 linear mapping of ``db_range`` (default -40..10 dB) onto
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Sequence
 
 from ..core import Encoding, Product, register, resolve_period, run, split_period
@@ -57,9 +58,8 @@ class S1Composite(Product):
 
     def __init__(
         self,
-        year: int | None = None,
-        start_date=None,
-        end_date=None,
+        start_date,
+        end_date,
         polarizations: Sequence[str] = ("VV",),
         orbit: str | None = "ASCENDING",
         window_days: int | None = 10,
@@ -70,7 +70,7 @@ class S1Composite(Product):
         mask_border_noise: bool = True,
         db_range: tuple[float, float] = DEFAULT_DB_RANGE,
     ):
-        self.period = resolve_period(year, start_date, end_date)
+        self.period = resolve_period(start_date, end_date)
         self.windows = split_period(self.period, window_days)
         self.window_days = window_days
 
@@ -100,8 +100,13 @@ class S1Composite(Product):
         self.encoding = s1_encoding(self.db_range)
 
     @property
-    def band_names(self) -> list[str]:
-        return [f"{p}_{w.start.isoformat()}" for p in self.polarizations for w in self.windows]
+    def times(self) -> list[str]:
+        """Start date (ISO) of every window."""
+        return [w.start.isoformat() for w in self.windows]
+
+    @property
+    def channels(self) -> list[str]:
+        return list(self.polarizations)
 
     def metadata(self) -> dict:
         return {
@@ -111,7 +116,7 @@ class S1Composite(Product):
             "window_days": self.window_days if self.window_days else self.period.days,
             "reducer": self.reducer + (" (linear power)" if self.linear and self.reducer == "mean" else ""),
             "start_date": self.period.start.isoformat(),
-            "end_date_exclusive": self.period.end.isoformat(),
+            "end_date": (self.period.end - timedelta(days=1)).isoformat(),
             "units": "dB",
         }
 
@@ -158,8 +163,8 @@ class S1Composite(Product):
                      .updateMask(ee.Image.constant(0)))
             per_window.append(ee.Image(ee.Algorithms.If(
                 sub.size().gt(0), reduced.select(self.polarizations, names), empty)))
-        # window-major -> polarisation-major band order
-        return ee.Image.cat(per_window).select(self.band_names)
+        # time-major: all polarisations of window 0, then window 1, ...
+        return ee.Image.cat(per_window)
 
     def prepare(self, grid, verbose=True):
         if not verbose:
@@ -179,9 +184,8 @@ class S1Composite(Product):
 
 def ee_download_s1_composite(
     raster_ref_image: GridLike,
-    year: int | None = None,
-    start_date=None,
-    end_date=None,
+    start_date,
+    end_date,
     polarizations: Sequence[str] = ("VV",),
     orbit: str | None = "ASCENDING",
     window_days: int | None = 10,
@@ -194,6 +198,7 @@ def ee_download_s1_composite(
     *,
     res: float | None = None,
     path_out=None,
+    layout: str = "stack",
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
@@ -207,14 +212,14 @@ def ee_download_s1_composite(
     ----------
     raster_ref_image : str | Path | eetool.Grid
         Reference raster (extent + CRS define the grid) or an :class:`eetool.Grid`.
-    year : int, optional
-        Shortcut for the calendar year; or give ``start_date`` / ``end_date``
-        (ISO, ``end_date`` EXCLUSIVE).
+    start_date, end_date : str | datetime.date
+        First and last day, BOTH INCLUSIVE: ``"20240101"`` / ``"2024-12-31"``.
     polarizations : sequence of str
         Any of "VV", "VH", "HH", "HV". Only scenes having all of them are used.
     orbit : {"ASCENDING", "DESCENDING", "BOTH"}
     window_days : int or None
-        Window length; the last window is cut at the end date. ``None`` = one
+        Window length in days, starting at ``start_date``; the last window is
+        cut at ``end_date``. ``None`` = one
         composite over the whole period.
     reducer : {"mean", "median", "min", "max"}
     linear : bool
@@ -227,23 +232,24 @@ def ee_download_s1_composite(
         Mask values below -30 dB (swath-edge noise) in every scene.
     db_range : (float, float)
         dB range mapped onto uint16 for storage.
-    res, path_out, tile_size, n_workers, max_retries, verbose
-        Download options shared by all eetool functions (default res: 10 m);
+    res, path_out, layout, tile_size, n_workers, max_retries, verbose
+        Options shared by all eetool functions (default res: 10 m);
         see :func:`eetool.download`.
 
     Returns
     -------
-    RasterResult | str
-        ``path_out is None`` -> :class:`eetool.RasterResult`
-        (n_polarizations * n_windows, H, W) uint16, bands named
-        ``"VV_2024-01-01"``, ``"VV_2024-01-11"``, ... (polarisation-major);
-        ``result.decode()`` -> float32 dB. Otherwise the GeoTIFF path.
+    RasterResult | str | list[str]
+        ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
+        shape (n_windows, H, W, n_polarizations) uint16; ``result.times`` =
+        window start dates, ``result.channels`` = polarisations;
+        ``result.decode()`` -> float32 dB. Otherwise the GeoTIFF path(s).
     """
     product = S1Composite(
-        year=year, start_date=start_date, end_date=end_date, polarizations=polarizations,
+        start_date, end_date, polarizations=polarizations,
         orbit=orbit, window_days=window_days, reducer=reducer, linear=linear,
         relative_orbits=relative_orbits, platforms=platforms,
         mask_border_noise=mask_border_noise, db_range=db_range,
     )
-    return run(product, raster_ref_image, res=res, path_out=path_out, tile_size=tile_size,
-               n_workers=n_workers, max_retries=max_retries, verbose=verbose)
+    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+               tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
+               verbose=verbose)

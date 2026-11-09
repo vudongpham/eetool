@@ -7,12 +7,13 @@ then import it below and in ``eetool/__init__.py``.
 """
 
 from .embedding import AnnualEmbedding, dequantize_embedding, ee_download_annual_embedding, quantize_embedding
-from .landsat_s2 import COMMON_BANDS, LandsatS2STM, ee_download_landsat_s2_stm
+from .landsat_s2 import (COMMON_BANDS, LandsatS2STM, LandsatS2TE, ee_download_landsat_s2_stm,
+                         ee_download_landsat_s2_te)
 from .sentinel1 import S1Composite, dequantize_s1, ee_download_s1_composite, quantize_s1
 
 __all__ = [
-    "AnnualEmbedding", "COMMON_BANDS", "LandsatS2STM", "S1Composite",
+    "AnnualEmbedding", "COMMON_BANDS", "LandsatS2STM", "LandsatS2TE", "S1Composite",
     "dequantize_embedding", "dequantize_s1", "ee_download_annual_embedding",
-    "ee_download_landsat_s2_stm", "ee_download_s1_composite", "quantize_embedding",
+    "ee_download_landsat_s2_stm", "ee_download_landsat_s2_te", "ee_download_s1_composite", "quantize_embedding",
     "quantize_s1",
 ]
