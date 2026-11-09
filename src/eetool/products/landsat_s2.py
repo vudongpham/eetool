@@ -21,7 +21,14 @@ import numpy as np
 from ..core import Encoding, Product, register, resolve_period, run, split_period
 from ..core.grid import GridLike
 
+#: bands shared by Landsat and Sentinel-2 (used whenever Landsat is selected)
 COMMON_BANDS = ["blue", "green", "red", "nir", "swir1", "swir2"]
+#: all bands available when only Sentinel-2 is selected (wavelength order)
+S2_BANDS = ["blue", "green", "red", "re1", "re2", "re3", "bnir", "nir", "swir1", "swir2"]
+#: Sentinel-2 L2A band for each name (nir = narrow NIR B8A, bnir = broad NIR B8)
+S2_BAND_MAP = {"blue": "B2", "green": "B3", "red": "B4", "re1": "B5", "re2": "B6",
+               "re3": "B7", "bnir": "B8", "nir": "B8A", "swir1": "B11", "swir2": "B12"}
+S2_ONLY_BANDS = [b for b in S2_BANDS if b not in COMMON_BANDS]
 
 # Landsat Collection 2 Level-2 surface reflectance
 _TM_ETM_BANDS = ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"]
@@ -131,13 +138,28 @@ def parse_sensors(sensors):
     return landsat, s2
 
 
-def _parse_bands(bands):
-    bands = list(COMMON_BANDS if bands is None else ([bands] if isinstance(bands, str) else bands))
-    bad = [b for b in bands if b not in COMMON_BANDS]
-    if bad:
-        raise ValueError(f"Unknown band(s) {bad}; choose from {COMMON_BANDS}")
+def parse_bands(bands, s2_only: bool):
+    """
+    Default: all 10 Sentinel-2 bands when only Sentinel-2 is selected, else
+    the 6 bands shared with Landsat. Red-edge (re1-re3) and broad NIR (bnir)
+    exist only for Sentinel-2, so asking for them with Landsat is an error.
+    """
+    available = S2_BANDS if s2_only else COMMON_BANDS
+    if bands is None:
+        return list(available)
+    bands = [bands] if isinstance(bands, str) else list(bands)
+    bands = [str(b).lower() for b in bands]
     if not bands:
         raise ValueError("Select at least one band")
+    s2_only_asked = [b for b in bands if b in S2_ONLY_BANDS]
+    if s2_only_asked and not s2_only:
+        raise ValueError(
+            f"Band(s) {s2_only_asked} exist only for Sentinel-2, but Landsat sensors are "
+            f"selected too. Use sensors=['S2'] (or S2A/S2B/S2C) only, or choose from "
+            f"{COMMON_BANDS}.")
+    bad = [b for b in bands if b not in available]
+    if bad:
+        raise ValueError(f"Unknown band(s) {bad}; choose from {available}")
     return list(dict.fromkeys(bands))
 
 
@@ -164,7 +186,8 @@ class _LandsatS2Base(Product):
     ):
         self.period = resolve_period(start_date, end_date)
         self.landsat_keys, self.s2_platforms = parse_sensors(sensors)
-        self.bands = _parse_bands(bands)
+        self.s2_only = not self.landsat_keys
+        self.bands = parse_bands(bands, self.s2_only)
         if s2_nir not in ("B8A", "B8"):
             raise ValueError("s2_nir must be 'B8A' or 'B8'")
         if not 0 <= s2_cs_threshold <= 1:
@@ -237,7 +260,9 @@ class _LandsatS2Base(Product):
         clear = image.select("cs_cdf").gte(self.s2_cs_threshold)
         bad_scl = [0, 1] + ([11] if self.mask_snow else [])  # no data, defective, snow
         scl_ok = image.select("SCL").remap(bad_scl, [0] * len(bad_scl), 1)
-        optical = image.select(["B2", "B3", "B4", self.s2_nir, "B11", "B12"], COMMON_BANDS)
+        names = S2_BANDS if self.s2_only else COMMON_BANDS
+        band_map = dict(S2_BAND_MAP) if self.s2_only else {**S2_BAND_MAP, "nir": self.s2_nir}
+        optical = image.select([band_map[b] for b in names], names)
         if self.resample:
             optical = optical.resample(self.resample)
         optical = optical.divide(10000).updateMask(clear).updateMask(scl_ok)
@@ -401,12 +426,16 @@ _COMMON_DOC = """    sensors : sequence of str
         Sentinel-2 platforms ``"S2A"``, ``"S2B"``, ``"S2C"``, ... (``"S2"`` = all).
         All scenes are pooled into one stack.
     bands : sequence of str, optional
-        Subset of ``COMMON_BANDS`` (blue, green, red, nir, swir1, swir2);
-        default all six.
+        Sentinel-2 only: any of ``S2_BANDS`` (blue, green, red, re1, re2,
+        re3, bnir, nir, swir1, swir2), default all ten. With any Landsat
+        sensor: any of ``COMMON_BANDS`` (blue, green, red, nir, swir1, swir2),
+        default all six; re1-re3 / bnir then raise a ValueError.
     max_scene_cloud : float, optional
         Drop whole scenes whose cloud cover (%) exceeds this before pixel masking.
     s2_nir : {"B8A", "B8"}
-        Sentinel-2 band used as nir (B8A matches Landsat NIR better).
+        Only when Landsat and Sentinel-2 are mixed: the Sentinel-2 band used
+        as nir (B8A matches Landsat NIR better). Sentinel-2 alone always has
+        nir = B8A and bnir = B8.
     s2_cs_threshold : float
         Cloud Score+ ``cs_cdf`` threshold (0.5-0.65 typical, higher = stricter).
     mask_snow : bool

@@ -94,3 +94,62 @@ def test_te_nodata_out():
             LandsatS2TE("20150101", "20150131", NoDataOut=bad)
     with pytest.raises(TypeError):
         LandsatS2TE("20150101", "20150131", NoDataOut="x")
+
+
+def test_s2_only_gets_all_ten_bands():
+    from eetool import S2_BANDS
+
+    for sensors in ("S2", ["S2A", "S2B"], ("S2",)):
+        p = LandsatS2TE("20250101", "20251231", time_step=30, sensors=sensors)
+        assert p.channels == S2_BANDS
+        assert S2_BANDS == ["blue", "green", "red", "re1", "re2", "re3", "bnir", "nir",
+                            "swir1", "swir2"]
+    stm = LandsatS2STM("20250101", "20251231", percentiles=[0.5], sensors="S2",
+                       bands=["RE1", "bnir", "nir"])
+    assert stm.channels == ["re1", "bnir", "nir"]
+
+
+def test_landsat_keeps_six_bands_and_rejects_s2_only_bands():
+    assert LandsatS2TE("20250101", "20251231", sensors=["L8"]).channels == COMMON_BANDS6
+    with pytest.warns(UserWarning):              # Landsat + S2 pooled
+        mixed = LandsatS2STM("20250101", "20251231", sensors=["L8", "S2"])
+    assert mixed.channels == COMMON_BANDS6
+    for sensors in (["L8"], ["L9", "S2"]):
+        with pytest.raises(ValueError, match="only for Sentinel-2"):
+            LandsatS2TE("20250101", "20251231", sensors=sensors, bands=["red", "re1"])
+        with pytest.raises(ValueError, match="only for Sentinel-2"):
+            LandsatS2STM("20250101", "20251231", sensors=sensors, bands=["bnir"])
+    with pytest.raises(ValueError, match="Unknown band"):
+        LandsatS2TE("20250101", "20251231", sensors="S2", bands=["re4"])
+
+
+COMMON_BANDS6 = ["blue", "green", "red", "nir", "swir1", "swir2"]
+
+
+def test_public_te_per_time_files(ref_tif, tmp_path, monkeypatch):
+    """ee_get_landsat_s2_te(..., path_out=..., layout="per_time") end to end
+    (Earth Engine faked): one GeoTIFF per 30-day step with the 10 S2 bands."""
+    import ee
+    import numpy as np
+    import rasterio
+
+    import eetool
+
+    monkeypatch.setattr(LandsatS2TE, "request_image", lambda self, g, t, ids: None)
+
+    def compute(request):
+        d = request["grid"]["dimensions"]
+        return np.ones((d["height"], d["width"]), dtype=[(b, "i2") for b in request["bandIds"]])
+
+    monkeypatch.setattr(ee.data, "computePixels", compute)
+    paths = eetool.ee_get_landsat_s2_te(
+        ref_tif, start_date="2025-01-01", end_date="2025-12-31", time_step=30,
+        sensors=("S2"), path_out=tmp_path / "te.tif", layout="per_time")
+    assert len(paths) == 13 and paths[0].endswith("te_2025-01-01.tif")
+    with rasterio.open(paths[-1]) as src:
+        assert src.count == 10 and src.descriptions[3] == "re1"
+    back = eetool.read_raster(paths)
+    assert back.shape == (13, 70, 100, 10)
+    with pytest.raises(TypeError, match="per_time"):
+        eetool.ee_get_landsat_s2_te(ref_tif, "2025-01-01", "2025-12-31", sensors="S2",
+                                    per_time="times")
