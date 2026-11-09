@@ -110,4 +110,4 @@ def test_tile_size_capped():
 
 def test_download_by_name_kwargs_split():
     with pytest.raises(TypeError):
-        eetool.download(FakeProduct(), "ref.tif", year=2024)
+        eetool.download(FakeProduct(), "ref.tif", start_date="20240101")

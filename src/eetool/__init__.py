@@ -2,12 +2,12 @@
 eetool — download Google Earth Engine data onto your own pixel grid.
 
     import eetool
-    from eetool import (ee_download_landsat_s2_stm, ee_download_annual_embedding,
-                        ee_download_s1_composite)
+    from eetool import (ee_download_landsat_s2_stm, ee_download_landsat_s2_te,
+                        ee_download_annual_embedding, ee_download_s1_composite)
 
     eetool.initialize(project="my-gcp-project")
-    stm = ee_download_landsat_s2_stm("ref.tif", year=2024, percentiles=[0.1, 0.5, 0.9],
-                                     sensors=["L8", "L9"])
+    stm = ee_download_landsat_s2_stm("ref.tif", "20240101", "20241231",
+                                     percentiles=[0.1, 0.5, 0.9], sensors=["L8", "L9"])
     stm.to_raster("stm_2024.tif")
 """
 
@@ -29,11 +29,13 @@ from .products import (
     COMMON_BANDS,
     AnnualEmbedding,
     LandsatS2STM,
+    LandsatS2TE,
     S1Composite,
     dequantize_embedding,
     dequantize_s1,
     ee_download_annual_embedding,
     ee_download_landsat_s2_stm,
+    ee_download_landsat_s2_te,
     ee_download_s1_composite,
     quantize_embedding,
     quantize_s1,
@@ -59,8 +61,8 @@ def initialize(project: str | None = None, high_volume: bool = True, **kwargs) -
 
 __all__ = [
     "COMMON_BANDS", "DOWNLOAD_OPTIONS", "AnnualEmbedding", "Encoding", "Grid",
-    "LandsatS2STM", "Product", "RasterResult", "S1Composite", "__version__",
+    "LandsatS2STM", "LandsatS2TE", "Product", "RasterResult", "S1Composite", "__version__",
     "dequantize_embedding", "dequantize_s1", "download", "ee_download_annual_embedding",
-    "ee_download_landsat_s2_stm", "ee_download_s1_composite", "get_product", "initialize",
+    "ee_download_landsat_s2_stm", "ee_download_landsat_s2_te", "ee_download_s1_composite", "get_product", "initialize",
     "list_products", "quantize_embedding", "quantize_s1", "register", "write_raster",
 ]

@@ -71,12 +71,16 @@ def test_geographic_with_metres_rejected():
 
 # --- dates -------------------------------------------------------------------
 def test_periods():
-    p = resolve_period(year=2024)
+    p = resolve_period("20240101", "20241231")       # end date inclusive
     assert p == (date(2024, 1, 1), date(2025, 1, 1))
+    assert resolve_period("2024-01-01", date(2024, 12, 31)) == p
+    assert resolve_period("20240305", "20240305").days == 1
     w = split_period(p, 10)
     assert len(w) == 37 and w[-1].end == date(2025, 1, 1) and w[-1].days == 6
     assert split_period(p, None) == [p]
     with pytest.raises(ValueError):
-        resolve_period(year=2024, start_date="2024-01-01")
+        resolve_period("20240201", "20240131")
     with pytest.raises(ValueError):
-        resolve_period(start_date="2024-02-01", end_date="2024-01-01")
+        resolve_period("2024/01/01", "20241231")
+    with pytest.raises(ValueError):
+        resolve_period("20240101", None)

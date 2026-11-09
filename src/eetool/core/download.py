@@ -189,7 +189,8 @@ def download(product, raster_ref_image: GridLike, **kwargs):
     ``tile_size``, ``n_workers``, ``max_retries``, ``verbose``) control the
     download; all others are passed to the product's constructor::
 
-        eetool.download("s1_composite", "ref.tif", year=2024,
+        eetool.download("s1_composite", "ref.tif", start_date="20240101",
+                        end_date="20241231",
                         polarizations=["VV", "VH"], path_out="s1.tif")
     """
     options = {k: kwargs.pop(k) for k in list(kwargs) if k in DOWNLOAD_OPTIONS}

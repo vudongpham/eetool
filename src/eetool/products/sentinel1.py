@@ -9,6 +9,7 @@ Storage: uint16 linear mapping of ``db_range`` (default -40..10 dB) onto
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Sequence
 
 from ..core import Encoding, Product, register, resolve_period, run, split_period
@@ -57,9 +58,8 @@ class S1Composite(Product):
 
     def __init__(
         self,
-        year: int | None = None,
-        start_date=None,
-        end_date=None,
+        start_date,
+        end_date,
         polarizations: Sequence[str] = ("VV",),
         orbit: str | None = "ASCENDING",
         window_days: int | None = 10,
@@ -70,7 +70,7 @@ class S1Composite(Product):
         mask_border_noise: bool = True,
         db_range: tuple[float, float] = DEFAULT_DB_RANGE,
     ):
-        self.period = resolve_period(year, start_date, end_date)
+        self.period = resolve_period(start_date, end_date)
         self.windows = split_period(self.period, window_days)
         self.window_days = window_days
 
@@ -111,7 +111,7 @@ class S1Composite(Product):
             "window_days": self.window_days if self.window_days else self.period.days,
             "reducer": self.reducer + (" (linear power)" if self.linear and self.reducer == "mean" else ""),
             "start_date": self.period.start.isoformat(),
-            "end_date_exclusive": self.period.end.isoformat(),
+            "end_date": (self.period.end - timedelta(days=1)).isoformat(),
             "units": "dB",
         }
 
@@ -179,9 +179,8 @@ class S1Composite(Product):
 
 def ee_download_s1_composite(
     raster_ref_image: GridLike,
-    year: int | None = None,
-    start_date=None,
-    end_date=None,
+    start_date,
+    end_date,
     polarizations: Sequence[str] = ("VV",),
     orbit: str | None = "ASCENDING",
     window_days: int | None = 10,
@@ -207,14 +206,14 @@ def ee_download_s1_composite(
     ----------
     raster_ref_image : str | Path | eetool.Grid
         Reference raster (extent + CRS define the grid) or an :class:`eetool.Grid`.
-    year : int, optional
-        Shortcut for the calendar year; or give ``start_date`` / ``end_date``
-        (ISO, ``end_date`` EXCLUSIVE).
+    start_date, end_date : str | datetime.date
+        First and last day, BOTH INCLUSIVE: ``"20240101"`` / ``"2024-12-31"``.
     polarizations : sequence of str
         Any of "VV", "VH", "HH", "HV". Only scenes having all of them are used.
     orbit : {"ASCENDING", "DESCENDING", "BOTH"}
     window_days : int or None
-        Window length; the last window is cut at the end date. ``None`` = one
+        Window length in days, starting at ``start_date``; the last window is
+        cut at ``end_date``. ``None`` = one
         composite over the whole period.
     reducer : {"mean", "median", "min", "max"}
     linear : bool
@@ -240,7 +239,7 @@ def ee_download_s1_composite(
         ``result.decode()`` -> float32 dB. Otherwise the GeoTIFF path.
     """
     product = S1Composite(
-        year=year, start_date=start_date, end_date=end_date, polarizations=polarizations,
+        start_date, end_date, polarizations=polarizations,
         orbit=orbit, window_days=window_days, reducer=reducer, linear=linear,
         relative_orbits=relative_orbits, platforms=platforms,
         mask_border_noise=mask_border_noise, db_range=db_range,
