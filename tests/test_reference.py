@@ -104,7 +104,7 @@ def _block_imports(monkeypatch, *names):
 
     def fake_import(name, *args, **kwargs):
         if name.split(".")[0] in names:
-            raise ImportError(f"No module named {name!r}")
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
@@ -119,10 +119,65 @@ def test_vector_falls_back_to_fiona(aoi, tmp_path, monkeypatch):
     assert resolve_grid(path, 30) == expected
 
 
-def test_vector_without_any_reader(aoi, tmp_path, monkeypatch):
-    path = tmp_path / "aoi.gpkg"
+def test_gpkg_and_shp_need_no_library(aoi, tmp_path, monkeypatch):
+    gpkg, shp = tmp_path / "aoi.gpkg", tmp_path / "aoi.shp"
+    aoi.to_file(gpkg)
+    polys = aoi.set_geometry(aoi.buffer(5))
+    polys.to_file(shp)
+    expected_gpkg, expected_shp = resolve_grid(gpkg, 30), resolve_grid(shp, 30)
+    _block_imports(monkeypatch, "pyogrio", "fiona", "osgeo")
+    assert resolve_grid(gpkg, 30) == expected_gpkg
+    assert resolve_grid(shp, 30) == expected_shp
+    assert expected_shp.crs.to_epsg() == 32633          # CRS read from the .prj
+
+
+def test_other_formats_report_why(aoi, tmp_path, monkeypatch):
+    path = tmp_path / "aoi.geojson"
     aoi.to_file(path)
     _block_imports(monkeypatch, "pyogrio", "fiona", "osgeo")
-    with pytest.raises(ImportError, match="pip install pyogrio"):
+    with pytest.raises(ImportError, match="pyogrio: not installed") as err:
         resolve_grid(path, 30)
+    assert "conda install -c conda-forge pyogrio" in str(err.value)
     assert Grid.from_reference(aoi, 30).res == 30     # GeoDataFrames need no reader
+
+
+def test_broken_library_import_is_reported(aoi, tmp_path, monkeypatch):
+    import builtins
+
+    path = tmp_path / "aoi.geojson"
+    aoi.to_file(path)
+    _block_imports(monkeypatch, "fiona", "osgeo")
+    real_import = builtins.__import__
+
+    def dll_error(name, *args, **kwargs):
+        if name == "pyogrio":
+            raise ImportError("DLL load failed while importing _io: The specified "
+                              "procedure could not be found.")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", dll_error)
+    with pytest.raises(ImportError, match="pyogrio: installed, but importing it failed: "
+                                          "DLL load failed"):
+        resolve_grid(path, 30)
+
+
+def test_gpkg_builtin_matches_pyogrio(tmp_path):
+    pyogrio = pytest.importorskip("pyogrio")
+    from eetool.core.vector import _info_gpkg_builtin
+
+    gdf = gpd.GeoDataFrame(
+        geometry=[shapely.Point(3, 4), shapely.LineString([(-1, 2), (5, 9)]),
+                  shapely.Polygon([(0, 0), (10, 0), (10, 1)]),
+                  shapely.MultiPoint([(20, -5), (21, 30)])],
+        crs="EPSG:3035")
+    path = tmp_path / "mixed.gpkg"
+    gdf.to_file(path, layer="mixed")
+    gdf.iloc[:1].to_file(path, layer="other", mode="a")
+    ref = pyogrio.read_info(path, layer="mixed", force_total_bounds=True)
+    for use_rtree in (True, False):        # R-tree index, or parsing every geometry
+        crs, bounds, n = _info_gpkg_builtin(path, "mixed", use_rtree=use_rtree)
+        assert crs == "EPSG:3035" and n == 4
+        assert bounds == pytest.approx(tuple(ref["total_bounds"]))
+    assert _info_gpkg_builtin(path, "other")[1] == (3, 4, 3, 4)
+    with pytest.raises(ValueError, match="layers"):
+        _info_gpkg_builtin(path, "nope")
