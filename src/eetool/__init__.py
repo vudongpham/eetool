@@ -34,6 +34,7 @@ from .core import (
 )
 from .products import (
     COMMON_BANDS,
+    S2_BANDS,
     AnnualEmbedding,
     LandsatS2STM,
     LandsatS2TE,
@@ -48,7 +49,7 @@ from .products import (
     quantize_s1,
 )
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 HIGH_VOLUME_URL = "https://earthengine-highvolume.googleapis.com"
 
@@ -67,7 +68,7 @@ def initialize(project: str | None = None, high_volume: bool = True, **kwargs) -
 
 
 __all__ = [
-    "COMMON_BANDS", "DOWNLOAD_OPTIONS", "LAYOUTS", "AnnualEmbedding", "Encoding", "Grid",
+    "COMMON_BANDS", "DOWNLOAD_OPTIONS", "S2_BANDS", "LAYOUTS", "AnnualEmbedding", "Encoding", "Grid",
     "LandsatS2STM", "LandsatS2TE", "Product", "RasterResult", "S1Composite", "__version__",
     "dequantize_embedding", "dequantize_s1", "download", "get", "ee_get_annual_embedding",
     "ee_get_landsat_s2_stm", "ee_get_landsat_s2_te", "ee_get_s1_composite", "get_product", "initialize",
