@@ -33,7 +33,7 @@ emb = eetool.read_raster("embedding_2024.tif")
 
 # 4) Sentinel-1 15-day mean VV + VH, ascending -> (25, H, W, 2)
 s1 = ee_get_s1_composite(
-    ref, "20240101", "20241231", polarizations=["VV", "VH"], window_days=15,
+    ref, "20240101", "20241231", polarizations=["VV", "VH"], time_step=15,
     orbit="ASCENDING",
 )
 vv_db = s1.decode()[..., 0]     # (25, H, W) float32 dB, NaN = no data

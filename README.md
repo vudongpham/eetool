@@ -8,7 +8,7 @@ raster or vector file. Every function returns a 4-D array
 |---|---|---|
 | `ee_get_landsat_s2_te` | one step per `time_step` days | bands |
 | `ee_get_landsat_s2_stm` | one step per percentile (`p25`, `p50`, ...) | bands |
-| `ee_get_s1_composite` | one step per `window_days` days | polarisations |
+| `ee_get_s1_composite` | one step per `time_step` days | polarisations |
 | `ee_get_annual_embedding` | 1 (the year) | `A00` ... `A63` |
 
 ## Sensors and bands
@@ -112,12 +112,12 @@ Same arguments as `ee_get_landsat_s2_te` except `time_step`, `reducer` and
 
 Output: int16, reflectance × 10000, NoData = -9999.
 
-### `ee_get_s1_composite`: Sentinel-1 backscatter (dB) every `window_days`
+### `ee_get_s1_composite`: Sentinel-1 backscatter (dB) every `time_step` days
 
 | Argument | Default | Meaning |
 |---|---|---|
 | `polarizations` | `("VV",)` | Any of `"VV"`, `"VH"`, `"HH"`, `"HV"` |
-| `window_days` | `10` | Days per window; `None` = one composite |
+| `time_step` | `10` | Days per step, as in `ee_get_landsat_s2_te`; `None` = one composite |
 | `orbit` | `"ASCENDING"` | `"ASCENDING"`, `"DESCENDING"` or `"BOTH"` |
 | `reducer` | `"mean"` | `"mean"`, `"median"`, `"min"` or `"max"` |
 | `linear` | `False` | Average in linear power instead of dB |
@@ -126,7 +126,40 @@ Output: int16, reflectance × 10000, NoData = -9999.
 | `mask_border_noise` | `True` | Mask values below -30 dB |
 | `db_range` | `(-40, 10)` | dB range stored; values outside are clipped |
 
-Output: uint16 (`decode()` gives dB), NoData = 65535.
+Output: **uint16**. `db_range` (default -40..10 dB) is mapped onto 0..65534,
+so one step is 50 / 65534 ≈ 0.0008 dB. NoData = 65535.
+
+Converting the stored values back to dB:
+
+```python
+import numpy as np
+import eetool
+
+s1 = eetool.ee_get_s1_composite("ref.gpkg", "2024-01-01", "2024-12-31",
+                                 polarizations=["VV", "VH"], time_step=10)
+
+# 1) from the result
+db = s1.decode()                    # float32 dB, (time, H, W, pol), NaN = no data
+vv = db[..., s1.channels.index("VV")]
+
+# 2) any uint16 array, e.g. s1.data
+db = eetool.dequantize_s1(s1.data)  # pass db_range=(lo, hi) if you changed it
+
+# 3) the formula, without eetool
+def s1_to_db(q, db_min=-40.0, db_max=10.0):
+    q = np.asarray(q)
+    db = q.astype("float32") * (db_max - db_min) / 65534 + db_min
+    return np.where(q == 65535, np.nan, db)
+
+# 4) from a GeoTIFF written with path_out=... (the file stores the scale itself)
+import rasterio
+with rasterio.open("s1.tif") as src:
+    q = src.read()                  # (bands, H, W) uint16
+    factor = float(src.tags()["eetool_factor"])
+    offset = float(src.tags()["eetool_offset"])
+    db = np.where(q == src.nodata, np.nan, q / factor + offset)
+# or: eetool.read_raster("s1.tif").decode()
+```
 
 ### `ee_get_annual_embedding`: Google Satellite Embedding
 
