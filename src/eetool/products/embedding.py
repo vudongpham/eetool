@@ -91,7 +91,7 @@ def ee_get_annual_embedding(
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
-    verbose: bool = True,
+    showProgress: bool = False,
 ):
     """
     Annual Google Satellite Embedding on the reference grid.
@@ -106,7 +106,7 @@ def ee_get_annual_embedding(
         Embedding year.
     bands : sequence of str, optional
         Subset of ``A00`` .. ``A63`` (default: all 64).
-    res, path_out, layout, tile_size, n_workers, max_retries, verbose
+    res, path_out, layout, tile_size, n_workers, max_retries, showProgress
         Options shared by all eetool functions (default res: 10 m);
         see :func:`eetool.get`.
 
@@ -121,4 +121,4 @@ def ee_get_annual_embedding(
     product = AnnualEmbedding(year=year, bands=bands)
     return run(product, reference, res=res, path_out=path_out, layout=layout,
                tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
-               verbose=verbose)
+               showProgress=showProgress)

@@ -74,3 +74,23 @@ def test_te_steps_and_band_names():
         LandsatS2TE("20150101", "20151231", time_step=0)
     with pytest.raises(ValueError):
         LandsatS2TE("20150101", "20151231", reducer="p90")
+
+
+def test_te_nodata_out():
+    import numpy as np
+
+    assert LandsatS2TE("20150101", "20150131").encoding.nodata == -9999
+    p = LandsatS2TE("20150101", "20150131", NoDataOut=-32768, sensors=["L8"])
+    enc = p.encoding
+    assert enc.nodata == -32768 and enc.dtype == "int16"
+    q = enc.encode([0.1234, np.nan, -10.0])           # -10 would clamp onto -32768
+    assert q.tolist() == [1234, -32768, -32767]
+    assert np.isnan(enc.decode(q)[1]) and np.isclose(enc.decode(q)[0], 0.1234)
+    assert LandsatS2TE("20150101", "20150131", NoDataOut=-20000.0).encoding.nodata == -20000
+    with pytest.warns(UserWarning, match="inside the range"):
+        LandsatS2TE("20150101", "20150131", NoDataOut=0)
+    for bad in (40000, 1.5, float("nan")):
+        with pytest.raises(ValueError):
+            LandsatS2TE("20150101", "20150131", NoDataOut=bad)
+    with pytest.raises(TypeError):
+        LandsatS2TE("20150101", "20150131", NoDataOut="x")

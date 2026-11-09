@@ -202,7 +202,7 @@ def ee_get_s1_composite(
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
-    verbose: bool = True,
+    showProgress: bool = False,
 ):
     """
     Sentinel-1 GRD backscatter composites in consecutive ``window_days``
@@ -234,7 +234,7 @@ def ee_get_s1_composite(
         Mask values below -30 dB (swath-edge noise) in every scene.
     db_range : (float, float)
         dB range mapped onto uint16 for storage.
-    res, path_out, layout, tile_size, n_workers, max_retries, verbose
+    res, path_out, layout, tile_size, n_workers, max_retries, showProgress
         Options shared by all eetool functions (default res: 10 m);
         see :func:`eetool.get`.
 
@@ -254,4 +254,4 @@ def ee_get_s1_composite(
     )
     return run(product, reference, res=res, path_out=path_out, layout=layout,
                tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
-               verbose=verbose)
+               showProgress=showProgress)
