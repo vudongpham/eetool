@@ -32,6 +32,45 @@ raises an error.
 Sentinel-1 GRD (`ee_get_s1_composite`) and the Google Satellite Embedding
 (`ee_get_annual_embedding`) have their own functions.
 
+## Data sources
+
+Each function reads these Earth Engine `ImageCollection`s:
+
+| Function | `sensors=` / data | Earth Engine `ImageCollection` |
+|---|---|---|
+| `ee_get_landsat_s2_te`, `ee_get_landsat_s2_stm` | `"L4"` | [`LANDSAT/LT04/C02/T1_L2`](https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LT04_C02_T1_L2) |
+| | `"L5"` | [`LANDSAT/LT05/C02/T1_L2`](https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LT05_C02_T1_L2) |
+| | `"L7"` | [`LANDSAT/LE07/C02/T1_L2`](https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LE07_C02_T1_L2) |
+| | `"L8"` | [`LANDSAT/LC08/C02/T1_L2`](https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LC08_C02_T1_L2) |
+| | `"L9"` | [`LANDSAT/LC09/C02/T1_L2`](https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LC09_C02_T1_L2) |
+| | `"S2"`, `"S2A"`, ... | [`COPERNICUS/S2_SR_HARMONIZED`](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED) |
+| | S2 cloud mask | [`GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED`](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_CLOUD_SCORE_PLUS_V1_S2_HARMONIZED) (band `cs_cdf`) |
+| `ee_get_s1_composite` | Sentinel-1 GRD, IW mode | [`COPERNICUS/S1_GRD`](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S1_GRD) |
+| `ee_get_annual_embedding` | Satellite Embedding | [`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL) |
+
+How each source is used:
+
+- **Landsat** (Collection 2, Tier 1, Level-2 surface reflectance): bands
+  `SR_B1 SR_B2 SR_B3 SR_B4 SR_B5 SR_B7` (TM / ETM+) or
+  `SR_B2 SR_B3 SR_B4 SR_B5 SR_B6 SR_B7` (OLI) become
+  `blue green red nir swir1 swir2`, scaled with `× 0.0000275 − 0.2`. Masked
+  with `QA_PIXEL` (fill, dilated cloud, cirrus, cloud, shadow, and snow if
+  `mask_snow=True`) and `QA_RADSAT` (saturated pixels). `max_scene_cloud`
+  filters on `CLOUD_COVER`.
+- **Sentinel-2** (L2A, harmonized: the 2022 processing-baseline offset is
+  already removed): bands `B2 B3 B4 B5 B6 B7 B8 B8A B11 B12`, divided by 10000.
+  Each scene is joined to its Cloud Score+ image and masked where
+  `cs_cdf < s2_cs_threshold`, plus `SCL` classes 0 (no data), 1 (defective) and
+  11 (snow, if `mask_snow=True`). `max_scene_cloud` filters on
+  `CLOUDY_PIXEL_PERCENTAGE`; `S2A`/`S2B`/`S2C` filter on `SPACECRAFT_NAME`.
+- **Sentinel-1**: GRD scenes in `instrumentMode = IW` with the requested
+  polarisations (`transmitterReceiverPolarisation`), already calibrated and
+  terrain-corrected to dB by Earth Engine. `orbit`, `relative_orbits` and
+  `platforms` filter on `orbitProperties_pass`, `relativeOrbitNumber_start`
+  and `platform_number`.
+- **Satellite Embedding**: the annual images of `year` (UTM tiles) are mosaicked;
+  bands `A00` ... `A63`.
+
 ## Install
 
 ```bash
