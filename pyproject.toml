@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eetool"
-version = "0.1.0"
+version = "0.2.0"
 description = "Google Earth Engine data (Landsat/Sentinel-2, Satellite Embedding, Sentinel-1) as (time, H, W, channel) numpy arrays on your own pixel grid."
 readme = "README.md"
 requires-python = ">=3.9"

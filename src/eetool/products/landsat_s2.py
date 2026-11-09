@@ -273,12 +273,12 @@ class LandsatS2STM(_LandsatS2Base):
 
     @property
     def times(self) -> list[str]:
-        """One time step: the period, labelled by its first day."""
-        return [self.period.start.isoformat()]
+        """One step per percentile (``"p10"``, ``"p50"``, ...), in the order given."""
+        return [percentile_label(p) for p in self.percentiles]
 
     @property
     def channels(self) -> list[str]:
-        return [f"{percentile_label(p)}_{b}" for p in self.percentiles for b in self.bands]
+        return list(self.bands)
 
     def metadata(self) -> dict:
         return {**super().metadata(),
@@ -293,6 +293,7 @@ class LandsatS2STM(_LandsatS2Base):
             [self.percentiles[i] * 100 for i in order],
             outputNames=[f"q{i}" for i in order],
         )
+        # time-major: all bands of percentile 0, then percentile 1, ...
         out = [f"{b}_q{i}" for i in range(len(self.percentiles)) for b in self.bands]
         return ee.Image(ee.Algorithms.If(coll.size().gt(0),
                                          coll.reduce(reducer).select(out), self._empty(out)))
@@ -432,9 +433,9 @@ ee_download_landsat_s2_stm.__doc__ = """
     -------
     RasterResult | str | list[str]
         ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
-        shape (1, H, W, n_percentiles * n_bands), int16 = reflectance * 10000,
-        NoData = -9999; channels ``"p10_blue"``, ``"p10_green"``, ...
-        (percentile-major). Otherwise the GeoTIFF path(s).
+        shape (n_percentiles, H, W, n_bands), int16 = reflectance * 10000,
+        NoData = -9999; ``result.times`` = percentile labels (``"p10"``, ...),
+        ``result.channels`` = bands. Otherwise the GeoTIFF path(s).
 """
 
 

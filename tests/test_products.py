@@ -26,9 +26,12 @@ def test_stm_band_names():
     p = LandsatS2STM("20240101", "20241231", percentiles=[0.9, 0.025], sensors=["L8"],
                      bands=["red", "nir"])
     assert percentile_label(0.025) == "p2.5"
-    assert p.times == ["2024-01-01"]
-    assert p.channels == ["p90_red", "p90_nir", "p2.5_red", "p2.5_nir"]
-    assert p.band_names == p.channels       # one time step -> plain channel names
+    assert p.times == ["p90", "p2.5"]       # one time step per percentile
+    assert p.channels == ["red", "nir"]
+    assert p.shape == (2, 2)
+    assert p.band_names == ["red_p90", "nir_p90", "red_p2.5", "nir_p2.5"]
+    one = LandsatS2STM("20240101", "20241231", percentiles=[0.5], sensors=["L8"])
+    assert one.shape == (1, 6) and one.band_names == one.channels
     assert p.encoding.dtype == "int16"
 
 

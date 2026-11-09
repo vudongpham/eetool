@@ -18,12 +18,12 @@ print(te.times[:2], te.channels)
 x = te.decode()                 # float32 reflectance, NaN = no data
 red_nir = te.sel(channel=["red", "nir"]).data   # (53, H, W, 2)
 
-# 2) Landsat 8/9 percentiles over three years -> (1, H, W, 18)
+# 2) Landsat 8/9 percentiles over three years -> (3, H, W, 6), one step per percentile
 stm = ee_download_landsat_s2_stm(
     ref, start_date="20230101", end_date="20251231",
     percentiles=[0.1, 0.5, 0.75], sensors=["L8", "L9"],
 )
-print(stm.channels[:3])         # ['p10_blue', 'p10_green', 'p10_red']
+print(stm.times)                # ['p10', 'p50', 'p75']
 
 # 3) Satellite Embedding 2024 at 10 m -> (1, H, W, 64)
 #    (large: stream straight to disk instead of holding it in memory)

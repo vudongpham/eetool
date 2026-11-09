@@ -11,7 +11,7 @@ Every function returns a :class:`RasterResult` whose ``data`` is a 4-D array
     eetool.initialize(project="my-gcp-project")
     stm = ee_download_landsat_s2_stm("ref.tif", "20240101", "20241231",
                                      percentiles=[0.1, 0.5, 0.9], sensors=["L8", "L9"])
-    stm.data.shape            # (1, H, W, 18): (time, H, W, channel)
+    stm.data.shape            # (3, H, W, 6): (percentile, H, W, band)
     stm.to_raster("stm_2024.tif")
 """
 
@@ -47,7 +47,7 @@ from .products import (
     quantize_s1,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 HIGH_VOLUME_URL = "https://earthengine-highvolume.googleapis.com"
 

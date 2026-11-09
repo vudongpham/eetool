@@ -11,13 +11,20 @@ georeference it.
 |---|---|---|
 | `ee_download_landsat_s2_te` | one step per `time_step` days | spectral bands |
 | `ee_download_s1_composite` | one step per `window_days` days | polarisations |
-| `ee_download_landsat_s2_stm` | 1 (the whole period) | percentile × band (`p10_blue`, ...) |
+| `ee_download_landsat_s2_stm` | one per percentile (`p10`, `p50`, ...) | spectral bands |
 | `ee_download_annual_embedding` | 1 (the year) | `A00` ... `A63` |
 
 ## Install
 
 ```bash
-pip install git+https://github.com/vudongpham/eetool.git
+pip install --upgrade --force-reinstall git+https://github.com/vudongpham/eetool.git
+```
+
+This also replaces an eetool that is already installed. To update only eetool
+and leave its dependencies (numpy, rasterio, earthengine-api) as they are:
+
+```bash
+pip install --upgrade --force-reinstall --no-deps git+https://github.com/vudongpham/eetool.git
 ```
 
 ## Quick start
@@ -42,7 +49,8 @@ x = te.decode()      # float32 reflectance, NaN where there is no clear observat
 # Landsat 8/9 percentiles for 2024
 stm = ee_download_landsat_s2_stm(ref, "20240101", "20241231",
                                  percentiles=[0.1, 0.5, 0.9], sensors=["L8", "L9"])
-stm.data.shape       # (1, H, W, 18)
+stm.data.shape       # (3, H, W, 6)    one time step per percentile
+stm.times            # ['p10', 'p50', 'p90']
 
 # Satellite Embedding for 2024
 emb = ee_download_annual_embedding(ref, year=2024)
@@ -98,7 +106,8 @@ A GeoTIFF band is 2-D, so a 4-D array is saved in one of two layouts:
 | `"stack"` (default) | `out.tif` | time × channel, time-major: `blue_2015-01-01, green_2015-01-01, ..., blue_2015-01-08, ...` |
 | `"per_time"` | `out_2015-01-01.tif`, `out_2015-01-08.tif`, ... | channel |
 
-With one time step (STM, embedding), the band names are just the channel names.
+With one time step (embedding, or STM with one percentile), the band names are just the channel names.
+For STM the "time" label is the percentile: `blue_p10, green_p10, ..., blue_p50, ...`.
 Both layouts store the time and channel labels in the file tags, so
 `eetool.read_raster` gives back the same 4-D array:
 
@@ -165,8 +174,9 @@ ee_download_landsat_s2_stm(
 | `mask_snow` | Also mask snow and ice |
 | `resample` | `None` (nearest), `"bilinear"` or `"bicubic"`. Useful for Sentinel-2 at 30 m |
 
-**Output:** `(1, H, W, n_percentiles × n_bands)`, int16, reflectance × 10000,
-NoData = -9999. Channels are `p10_blue, p10_green, ..., p50_blue, ...`.
+**Output:** `(n_percentiles, H, W, n_bands)`, int16, reflectance × 10000,
+NoData = -9999. The time axis holds the percentiles in the order given
+(`res.times == ['p10', 'p25', 'p50', 'p75']`), the channel axis the bands.
 
 ## `ee_download_landsat_s2_te`
 
