@@ -45,31 +45,7 @@ mixed, e.g. `sensors=["L8", "L9", "S2"]`. Names are not case-sensitive, and
 pip install --upgrade --force-reinstall git+https://github.com/vudongpham/eetool.git
 ```
 
-This also replaces an eetool that is already installed, and installs its
-dependencies: numpy, rasterio, earthengine-api and pyogrio (for vector
-references).
-
-In a conda environment, install the geospatial libraries from conda-forge
-first, then eetool:
-
-```bash
-conda install -c conda-forge rasterio pyogrio earthengine-api
-```
-
-```bash
-pip install --upgrade --force-reinstall git+https://github.com/vudongpham/eetool.git
-```
-
-To update only eetool and leave the installed dependencies as they are, add
-`--no-deps`. **This skips dependencies that a new version adds**, so use it only
-when they are already installed:
-
-```bash
-pip install --upgrade --force-reinstall --no-deps git+https://github.com/vudongpham/eetool.git
-```
-
-Vector files are read with pyogrio; if it is missing, eetool falls back to
-fiona or GDAL's `osgeo` when one of them is installed.
+This one command installs eetool, or replaces the installed version.
 
 ## Quick start
 
@@ -205,6 +181,10 @@ ee_get_s1_composite(gdf, "20240101", "20241231", res=20)          # a GeoDataFra
 grid = eetool.Grid.from_vector("data.gpkg", res=30, layer="fields", crs="EPSG:3035")
 ee_get_annual_embedding(grid, year=2024)
 ```
+
+`.gpkg` and `.shp` files are read without any extra library. Other vector
+formats (GeoJSON, FlatGeobuf, GeoParquet, ...) need pyogrio
+(`pip install pyogrio`), fiona or GDAL's `osgeo`.
 
 The output is clipped to the extent of the features: its upper-left corner is
 exactly (xmin, ymax), and the width and height are `(xmax - xmin) / res` and

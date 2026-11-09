@@ -241,64 +241,14 @@ def _is_geodataframe(obj) -> bool:
     return hasattr(obj, "total_bounds") and hasattr(obj, "crs")
 
 
-def _info_pyogrio(path, layer):
-    import pyogrio
-
-    info = pyogrio.read_info(path, layer=layer, force_total_bounds=True)
-    return info.get("crs") or None, info.get("total_bounds"), info.get("features", -1)
-
-
-def _info_fiona(path, layer):
-    import fiona
-
-    with fiona.open(path, layer=layer) as src:
-        crs = src.crs.to_wkt() if hasattr(src.crs, "to_wkt") else (src.crs_wkt or None)
-        return crs or None, tuple(src.bounds), len(src)
-
-
-def _info_ogr(path, layer):
-    from osgeo import ogr
-
-    ds = ogr.Open(path)
-    if ds is None:
-        raise ValueError(f"GDAL/OGR cannot open {path}")
-    lyr = (ds.GetLayer(0) if layer is None else
-           ds.GetLayer(layer) if isinstance(layer, int) else ds.GetLayerByName(str(layer)))
-    if lyr is None:
-        raise ValueError(f"No layer {layer!r} in {path}")
-    srs = lyr.GetSpatialRef()
-    n = lyr.GetFeatureCount()
-    xmin, xmax, ymin, ymax = lyr.GetExtent(True) if n else (np.nan,) * 4
-    return (srs.ExportToWkt() if srs is not None else None), (xmin, ymin, xmax, ymax), n
-
-
-#: tried in this order; the first one that can be imported is used
-_VECTOR_READERS = (("pyogrio", _info_pyogrio), ("fiona", _info_fiona),
-                   ("osgeo", _info_ogr))
-
-
-def _vector_info(path, layer=None):
-    """(crs or None, (xmin, ymin, xmax, ymax), n_features) with the first available reader."""
-    for _name, reader in _VECTOR_READERS:
-        try:
-            return reader(path, layer)
-        except ImportError:
-            continue
-    raise ImportError(
-        "Reading a vector reference needs pyogrio (or fiona, or GDAL's osgeo), and none "
-        "is installed in this environment. Install one with:\n"
-        "    pip install pyogrio\n"
-        "or, in a conda environment:\n"
-        "    conda install -c conda-forge pyogrio"
-    )
-
-
 def _vector_crs_bounds(source, layer=None):
     if _is_geodataframe(source):
         crs = None if source.crs is None else CRS.from_user_input(source.crs)
         bounds = tuple(float(v) for v in source.total_bounds)
     else:
-        crs, bounds, n = _vector_info(str(source), layer)
+        from .vector import vector_info
+
+        crs, bounds, n = vector_info(source, layer)
         crs = None if not crs else CRS.from_user_input(crs)
         if bounds is None or n == 0:
             raise ValueError(f"Vector reference {source} has no features")
