@@ -182,8 +182,8 @@ class S1Composite(Product):
               f"{len(self.polarizations)} polarisation(s)")
 
 
-def ee_download_s1_composite(
-    raster_ref_image: GridLike,
+def ee_get_s1_composite(
+    reference: GridLike,
     start_date,
     end_date,
     polarizations: Sequence[str] = ("VV",),
@@ -210,8 +210,10 @@ def ee_download_s1_composite(
 
     Parameters
     ----------
-    raster_ref_image : str | Path | eetool.Grid
-        Reference raster (extent + CRS define the grid) or an :class:`eetool.Grid`.
+    reference : str | Path | GeoDataFrame | eetool.Grid
+        Defines the output grid: a raster file (its extent and CRS), a vector
+        file (``.gpkg``, ``.shp``, ``.geojson``, ...; the extent of all its
+        features), a GeoDataFrame / GeoSeries, or an :class:`eetool.Grid`.
     start_date, end_date : str | datetime.date
         First and last day, BOTH INCLUSIVE: ``"20240101"`` / ``"2024-12-31"``.
     polarizations : sequence of str
@@ -234,7 +236,7 @@ def ee_download_s1_composite(
         dB range mapped onto uint16 for storage.
     res, path_out, layout, tile_size, n_workers, max_retries, verbose
         Options shared by all eetool functions (default res: 10 m);
-        see :func:`eetool.download`.
+        see :func:`eetool.get`.
 
     Returns
     -------
@@ -250,6 +252,6 @@ def ee_download_s1_composite(
         relative_orbits=relative_orbits, platforms=platforms,
         mask_border_noise=mask_border_noise, db_range=db_range,
     )
-    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+    return run(product, reference, res=res, path_out=path_out, layout=layout,
                tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
                verbose=verbose)

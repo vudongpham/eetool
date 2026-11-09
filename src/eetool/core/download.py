@@ -95,7 +95,7 @@ def _progress(done, total, t0):
 
 def run(
     product: Product,
-    raster_ref_image: GridLike,
+    reference: GridLike,
     *,
     res: float | None = None,
     path_out: str | os.PathLike | None = None,
@@ -106,7 +106,7 @@ def run(
     verbose: bool = True,
 ) -> Union[RasterResult, str, list]:
     """
-    Download ``product`` on the grid of ``raster_ref_image``.
+    Download ``product`` on the grid of ``reference``.
 
     Returns a :class:`RasterResult` whose ``data`` is (time, H, W, channel)
     when ``path_out`` is None. Otherwise streams the tiles to disk without
@@ -115,9 +115,9 @@ def run(
     """
     if layout not in LAYOUTS:
         raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
-    if res is None and not isinstance(raster_ref_image, Grid):
+    if res is None and not isinstance(reference, Grid):
         res = product.default_res
-    grid = resolve_grid(raster_ref_image, res)
+    grid = resolve_grid(reference, res)
 
     times, channels = list(product.times), list(product.channels)
     n_t, n_c = len(times), len(channels)
@@ -183,15 +183,15 @@ def run(
     return paths[0] if layout == "stack" else paths
 
 
-def download(product, raster_ref_image: GridLike, **kwargs):
+def get(product, reference: GridLike, **kwargs):
     """
-    Download any registered product by name (or a :class:`Product` instance).
+    Get any registered product by name (or a :class:`Product` instance).
 
     Keyword arguments named in ``DOWNLOAD_OPTIONS`` (``res``, ``path_out``,
     ``layout``, ``tile_size``, ``n_workers``, ``max_retries``, ``verbose``) control the
     download; all others are passed to the product's constructor::
 
-        eetool.download("s1_composite", "ref.tif", start_date="20240101",
+        eetool.get("s1_composite", "ref.tif", start_date="20240101",
                         end_date="20241231",
                         polarizations=["VV", "VH"], path_out="s1.tif")
     """
@@ -202,4 +202,8 @@ def download(product, raster_ref_image: GridLike, **kwargs):
         raise TypeError(f"Unexpected arguments for a Product instance: {sorted(kwargs)}")
     if not isinstance(product, Product):
         raise TypeError("product must be a registered name or a Product instance")
-    return run(product, raster_ref_image, **options)
+    return run(product, reference, **options)
+
+
+#: old name of :func:`get`
+download = get

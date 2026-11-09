@@ -1,20 +1,42 @@
 """
 Output pixel grid: CRS + upper-left corner + pixel size + dimensions.
 
-Every download in eetool is defined on a :class:`Grid`, so all products line
+Every product in eetool is computed on a :class:`Grid`, so all products line
 up pixel-for-pixel when they are built from the same reference.
+
+A reference can be:
+
+- a raster file (``.tif``, ``.vrt``, ...): its extent and CRS; ``res=None``
+  keeps its pixel size;
+- a vector file (``.gpkg``, ``.shp``, ``.geojson``, ``.fgb``, ...): the extent
+  of all its features, snapped outward to multiples of ``res``;
+- a GeoDataFrame / GeoSeries (anything with ``total_bounds`` and ``crs``);
+- a ready-made :class:`Grid`.
+
+Vectors in a geographic CRS (lon/lat) are put on the UTM zone of their centre
+unless ``crs`` is given (see :meth:`Grid.from_vector`).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, NamedTuple, Union
+import warnings
+from typing import Any, NamedTuple, Union
 
 import numpy as np
 import rasterio
+import rasterio.errors
 from affine import Affine
 from rasterio.crs import CRS
+from rasterio.warp import transform_bounds
+
+#: file extensions read as vectors (anything else is tried as a raster first)
+VECTOR_EXTENSIONS = {".gpkg", ".shp", ".geojson", ".json", ".fgb", ".gml", ".kml",
+                     ".kmz", ".gdb", ".parquet", ".geoparquet", ".tab", ".mif", ".sqlite",
+                     ".gpx", ".dxf", ".csv", ".zip"}
+RASTER_EXTENSIONS = {".tif", ".tiff", ".vrt", ".img", ".jp2", ".nc", ".hdf", ".h5",
+                     ".asc", ".dem", ".bil", ".png", ".jpg", ".jpeg"}
 
 
 class Tile(NamedTuple):
@@ -77,6 +99,69 @@ class Grid:
                 raise ValueError(f"Reference pixels are not square {native}; pass `res`.")
             res = native[0]
         return cls.from_bounds(bounds, crs, res)
+
+    @classmethod
+    def from_vector(cls, source, res: float, crs=None, layer=None, snap: bool = True) -> "Grid":
+        """
+        Grid covering all features of a vector file (``.gpkg``, ``.shp``,
+        ``.geojson``, ...) or of a GeoDataFrame / GeoSeries.
+
+        Parameters
+        ----------
+        source : path or GeoDataFrame / GeoSeries
+        res : float
+            Pixel size in units of the output CRS (vectors have no pixel size).
+        crs : optional
+            Output CRS (e.g. ``"EPSG:32633"``); the bounds are reprojected.
+            Default: the vector's CRS, or, if that is geographic (lon/lat),
+            the UTM zone of the extent's centre.
+        layer : str | int, optional
+            Layer of a multi-layer file (e.g. a GeoPackage); default the first.
+        snap : bool
+            Snap the extent outward to multiples of ``res`` so grids built from
+            different vectors line up.
+        """
+        if res is None or res <= 0:
+            raise ValueError("A vector reference needs a pixel size: pass `res` (e.g. res=30)")
+        src_crs, bounds = _vector_crs_bounds(source, layer)
+        if src_crs is None:
+            raise ValueError(f"Vector reference {source!r} has no CRS")
+        if crs is None and src_crs.is_geographic:
+            crs = utm_crs_for(bounds, src_crs)
+            warnings.warn(
+                f"The vector reference is in a geographic CRS ({src_crs.to_string()}); "
+                f"using {crs.to_string()} (UTM zone of its centre). Pass "
+                "`eetool.Grid.from_vector(path, res, crs=...)` to choose another CRS.",
+                stacklevel=3,
+            )
+        crs = src_crs if crs is None else CRS.from_user_input(crs)
+        if crs != src_crs:
+            bounds = transform_bounds(src_crs, crs, *bounds, densify_pts=21)
+        left, bottom, right, top = bounds
+        if right <= left or top <= bottom:  # a single point / a line along an axis
+            left, right = (left, left + res) if right <= left else (left, right)
+            bottom, top = (top - res, top) if top <= bottom else (bottom, top)
+        if snap:
+            left, bottom = np.floor(left / res) * res, np.floor(bottom / res) * res
+            right, top = np.ceil(right / res) * res, np.ceil(top / res) * res
+        return cls.from_bounds((left, bottom, right, top), crs, res)
+
+    @classmethod
+    def from_reference(cls, reference, res: float | None = None) -> "Grid":
+        """Raster file, vector file or GeoDataFrame -> Grid (see module docs)."""
+        if isinstance(reference, Grid):
+            if res is not None and not np.isclose(res, reference.res):
+                raise ValueError(f"res={res} conflicts with the Grid's res={reference.res}")
+            return reference
+        if _is_geodataframe(reference):
+            return cls.from_vector(reference, res)
+        if not isinstance(reference, (str, Path)):
+            raise TypeError("reference must be a raster/vector path, a GeoDataFrame/GeoSeries "
+                            f"or an eetool.Grid, got {type(reference).__name__}")
+        kind = reference_kind(reference)
+        if kind == "vector":
+            return cls.from_vector(reference, res)
+        return cls.from_raster(reference, res)
 
     # ------------------------------------------------------------------ #
     @property
@@ -145,13 +230,55 @@ class Grid:
                                      geodesic=False)
 
 
-GridLike = Union[str, Path, Grid]
+GridLike = Union[str, Path, Grid, Any]
 
 
-def resolve_grid(ref: GridLike, res: float | None) -> Grid:
-    """Accept a raster path or a ready-made :class:`Grid`."""
-    if isinstance(ref, Grid):
-        if res is not None and not np.isclose(res, ref.res):
-            raise ValueError(f"res={res} conflicts with the Grid's res={ref.res}")
-        return ref
-    return Grid.from_raster(ref, res)
+def _is_geodataframe(obj) -> bool:
+    return hasattr(obj, "total_bounds") and hasattr(obj, "crs")
+
+
+def _vector_crs_bounds(source, layer=None):
+    if _is_geodataframe(source):
+        crs = None if source.crs is None else CRS.from_user_input(source.crs)
+        bounds = tuple(float(v) for v in source.total_bounds)
+    else:
+        try:
+            import pyogrio
+        except ImportError:  # pragma: no cover
+            raise ImportError("Reading vector references needs pyogrio: pip install pyogrio") from None
+        info = pyogrio.read_info(str(source), layer=layer, force_total_bounds=True)
+        crs = None if not info.get("crs") else CRS.from_user_input(info["crs"])
+        bounds = info.get("total_bounds")
+        if bounds is None or info.get("features", 1) == 0:
+            raise ValueError(f"Vector reference {source} has no features")
+        bounds = tuple(float(v) for v in bounds)
+    if not np.all(np.isfinite(bounds)):
+        raise ValueError(f"Vector reference {source!r} has no valid geometries")
+    return crs, bounds
+
+
+def utm_crs_for(bounds, crs) -> CRS:
+    """WGS 84 / UTM zone (EPSG:326xx north, 327xx south) of the centre of ``bounds``."""
+    lon0, lat0, lon1, lat1 = transform_bounds(crs, "EPSG:4326", *bounds)
+    lon, lat = (lon0 + lon1) / 2, (lat0 + lat1) / 2
+    zone = int(np.clip(np.floor((lon + 180) / 6) + 1, 1, 60))
+    return CRS.from_epsg((32600 if lat >= 0 else 32700) + zone)
+
+
+def reference_kind(path) -> str:
+    """``"raster"`` or ``"vector"`` for a reference file."""
+    ext = Path(path).suffix.lower()
+    if ext in VECTOR_EXTENSIONS:
+        return "vector"
+    if ext in RASTER_EXTENSIONS:
+        return "raster"
+    try:  # unknown extension: ask GDAL through rasterio first
+        with rasterio.open(path):
+            return "raster"
+    except rasterio.errors.RasterioIOError:
+        return "vector"
+
+
+def resolve_grid(reference: GridLike, res: float | None) -> Grid:
+    """Raster path, vector path, GeoDataFrame or :class:`Grid` -> :class:`Grid`."""
+    return Grid.from_reference(reference, res)

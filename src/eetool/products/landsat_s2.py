@@ -379,11 +379,11 @@ _COMMON_DOC = """    sensors : sequence of str
         Resampling of optical bands when warping scenes to the grid
         (None = nearest neighbour).
     res, path_out, layout, tile_size, n_workers, max_retries, verbose
-        Options shared by every eetool function — see :func:`eetool.download`."""
+        Options shared by every eetool function — see :func:`eetool.get`."""
 
 
-def ee_download_landsat_s2_stm(
-    raster_ref_image: GridLike,
+def ee_get_landsat_s2_stm(
+    reference: GridLike,
     start_date,
     end_date,
     percentiles: Sequence[float] = (0.5,),
@@ -408,20 +408,21 @@ def ee_download_landsat_s2_stm(
         max_scene_cloud=max_scene_cloud, s2_nir=s2_nir, s2_cs_threshold=s2_cs_threshold,
         mask_snow=mask_snow, resample=resample,
     )
-    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+    return run(product, reference, res=res, path_out=path_out, layout=layout,
                tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
                verbose=verbose)
 
 
-ee_download_landsat_s2_stm.__doc__ = """
+ee_get_landsat_s2_stm.__doc__ = """
     Cloud-masked per-pixel percentile composite (spectral-temporal metrics) of
     Landsat and/or Sentinel-2 surface reflectance.
 
     Parameters
     ----------
-    raster_ref_image : str | Path | eetool.Grid
-        Reference raster (its upper-left corner, extent and CRS define the
-        output grid) or a ready-made :class:`eetool.Grid`.
+    reference : str | Path | GeoDataFrame | eetool.Grid
+        Defines the output grid: a raster file (its extent and CRS), a vector
+        file (``.gpkg``, ``.shp``, ``.geojson``, ...; the extent of all its
+        features), a GeoDataFrame / GeoSeries, or an :class:`eetool.Grid`.
     start_date, end_date : str | datetime.date
         First and last day, BOTH INCLUSIVE: ``"20150101"`` / ``"2015-12-31"``.
     percentiles : sequence of float
@@ -439,8 +440,8 @@ ee_download_landsat_s2_stm.__doc__ = """
 """
 
 
-def ee_download_landsat_s2_te(
-    raster_ref_image: GridLike,
+def ee_get_landsat_s2_te(
+    reference: GridLike,
     start_date,
     end_date,
     time_step: int = 7,
@@ -466,12 +467,12 @@ def ee_download_landsat_s2_te(
         bands=bands, max_scene_cloud=max_scene_cloud, s2_nir=s2_nir,
         s2_cs_threshold=s2_cs_threshold, mask_snow=mask_snow, resample=resample,
     )
-    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+    return run(product, reference, res=res, path_out=path_out, layout=layout,
                tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
                verbose=verbose)
 
 
-ee_download_landsat_s2_te.__doc__ = """
+ee_get_landsat_s2_te.__doc__ = """
     Temporal encoding: a regular time series of cloud-masked composites of
     Landsat and/or Sentinel-2 surface reflectance, one per ``time_step`` days.
 
@@ -483,9 +484,10 @@ ee_download_landsat_s2_te.__doc__ = """
 
     Parameters
     ----------
-    raster_ref_image : str | Path | eetool.Grid
-        Reference raster (its upper-left corner, extent and CRS define the
-        output grid) or a ready-made :class:`eetool.Grid`.
+    reference : str | Path | GeoDataFrame | eetool.Grid
+        Defines the output grid: a raster file (its extent and CRS), a vector
+        file (``.gpkg``, ``.shp``, ``.geojson``, ...; the extent of all its
+        features), a GeoDataFrame / GeoSeries, or an :class:`eetool.Grid`.
     start_date, end_date : str | datetime.date
         First and last day, BOTH INCLUSIVE: ``"20150101"`` / ``"2015-12-31"``.
     time_step : int

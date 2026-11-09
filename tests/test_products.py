@@ -10,8 +10,8 @@ def test_registry():
 
 
 def test_public_imports():
-    from eetool import (ee_download_annual_embedding, ee_download_landsat_s2_stm,  # noqa: F401
-                        ee_download_landsat_s2_te, ee_download_s1_composite)
+    from eetool import (ee_get_annual_embedding, ee_get_landsat_s2_stm,  # noqa: F401
+                        ee_get_landsat_s2_te, ee_get_s1_composite)
 
 
 def test_sensor_parsing():

@@ -180,6 +180,7 @@ def test_tile_size_capped():
 
 def test_download_by_name_kwargs_split():
     with pytest.raises(TypeError):
-        eetool.download(FakeProduct(), "ref.tif", start_date="20240101")
+        eetool.get(FakeProduct(), "ref.tif", start_date="20240101")
+    assert eetool.download is eetool.get
     with pytest.raises(ValueError):
         run(FakeProduct(), "ref.tif", layout="netcdf")
