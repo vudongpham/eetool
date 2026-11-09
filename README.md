@@ -82,6 +82,43 @@ ee_get_landsat_s2_te("ref.gpkg", "2025-01-01", "2025-12-31", time_step=30,
                      sensors="S2", path_out="te.tif", layout="per_time")
 ```
 
+## Running several jobs in parallel
+
+Earth Engine allows **40 concurrent requests per Cloud project** (the
+`project=` in `eetool.initialize`), for the standard and the high-volume
+endpoint. Each eetool job keeps at most `n_workers` tile requests in flight,
+whatever the function, so:
+
+**jobs in parallel × `n_workers` ≤ 40** (per project)
+
+| Function | Requests in flight per job | Max parallel jobs, `n_workers=4` | Recommended |
+|---|---|---|---|
+| `ee_get_landsat_s2_te` | 4 | 10 | 8 |
+| `ee_get_landsat_s2_stm` | 4 | 10 | 8 |
+| `ee_get_s1_composite` | 4 | 10 | 8 |
+| `ee_get_annual_embedding` | 4 | 10 | 8 |
+
+| `n_workers` | 1 | 2 | 4 | 5 | 8 | 10 |
+|---|---|---|---|---|---|---|
+| max parallel jobs | 40 | 20 | 10 | 8 | 5 | 4 |
+
+- Keep some headroom (e.g. 8 jobs × 4 workers = 32). `showProgress=True` adds a
+  short query per job before the tiles start, and the Code Editor or other
+  scripts on the same project use the same 40.
+- Jobs can mix functions: only the total number of requests counts.
+- Going over the limit returns "429 Too Many Requests". eetool retries a tile
+  with increasing waits (1, 2, 4, 8, 16 s; `max_retries=5`), so it slows
+  down. A tile fails only if it is still refused after the last retry.
+- Jobs on different Cloud projects do not share the limit.
+- Concurrency is not the only limit. Each project also has a monthly compute
+  quota (EECU-hours: 150 for the noncommercial Community tier, 1,000 for
+  Contributor). A project over its quota is put in a restricted mode with lower
+  concurrency.
+- The function changes how long each request takes, not how many run at once.
+  Sentinel-2 with Cloud Score+ and many time steps (`ee_get_landsat_s2_te`) is
+  the slowest per tile. If tiles time out or run out of memory, lower `tile_size`
+  rather than `n_workers`.
+
 ## Function-specific arguments
 
 ### `ee_get_landsat_s2_te`: composites every `time_step` days
