@@ -49,7 +49,7 @@ from .products import (
     quantize_s1,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 HIGH_VOLUME_URL = "https://earthengine-highvolume.googleapis.com"
 

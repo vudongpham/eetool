@@ -1,6 +1,6 @@
 """
 Sentinel-1 GRD (COPERNICUS/S1_GRD, IW mode, backscatter in dB) composites
-over consecutive time windows: (window, H, W, polarisation).
+one per ``time_step`` days: (time step, H, W, polarisation).
 
 Storage: uint16 linear mapping of ``db_range`` (default -40..10 dB) onto
 0..65534, NoData = 65535 (~0.0008 dB step). ``RasterResult.decode()`` or
@@ -51,7 +51,7 @@ def _parse_orbit(orbit):
 
 @register
 class S1Composite(Product):
-    """Sentinel-1 GRD backscatter composites over time windows."""
+    """Sentinel-1 GRD backscatter composites per time step."""
 
     name = "s1_composite"
     default_res = 10
@@ -62,7 +62,7 @@ class S1Composite(Product):
         end_date,
         polarizations: Sequence[str] = ("VV",),
         orbit: str | None = "ASCENDING",
-        window_days: int | None = 10,
+        time_step: int | None = 10,
         reducer: str = "mean",
         linear: bool = False,
         relative_orbits: Sequence[int] | None = None,
@@ -71,8 +71,8 @@ class S1Composite(Product):
         db_range: tuple[float, float] = DEFAULT_DB_RANGE,
     ):
         self.period = resolve_period(start_date, end_date)
-        self.windows = split_period(self.period, window_days)
-        self.window_days = window_days
+        self.windows = split_period(self.period, time_step)
+        self.time_step = time_step
 
         pols = [polarizations] if isinstance(polarizations, str) else list(polarizations)
         pols = list(dict.fromkeys(p.upper() for p in pols))
@@ -101,7 +101,7 @@ class S1Composite(Product):
 
     @property
     def times(self) -> list[str]:
-        """Start date (ISO) of every window."""
+        """Start date (ISO) of every time step."""
         return [w.start.isoformat() for w in self.windows]
 
     @property
@@ -113,7 +113,7 @@ class S1Composite(Product):
             "collection": COLLECTION,
             "polarizations": ",".join(self.polarizations),
             "orbit": self.orbit or "BOTH",
-            "window_days": self.window_days if self.window_days else self.period.days,
+            "time_step_days": self.time_step if self.time_step else self.period.days,
             "reducer": self.reducer + (" (linear power)" if self.linear and self.reducer == "mean" else ""),
             "start_date": self.period.start.isoformat(),
             "end_date": (self.period.end - timedelta(days=1)).isoformat(),
@@ -178,7 +178,7 @@ class S1Composite(Product):
             "platform": coll.aggregate_histogram("platform_number"),
         }).getInfo()
         print(f"[eetool] {info['n']} Sentinel-1 scene(s); orbit pass {info['pass']}, "
-              f"platform {info['platform']}; {len(self.windows)} window(s) x "
+              f"platform {info['platform']}; {len(self.windows)} time step(s) x "
               f"{len(self.polarizations)} polarisation(s)")
 
 
@@ -188,7 +188,7 @@ def ee_get_s1_composite(
     end_date,
     polarizations: Sequence[str] = ("VV",),
     orbit: str | None = "ASCENDING",
-    window_days: int | None = 10,
+    time_step: int | None = 10,
     reducer: str = "mean",
     linear: bool = False,
     relative_orbits: Sequence[int] | None = None,
@@ -205,8 +205,8 @@ def ee_get_s1_composite(
     showProgress: bool = False,
 ):
     """
-    Sentinel-1 GRD backscatter composites in consecutive ``window_days``
-    windows (e.g. 10-day means over a year).
+    Sentinel-1 GRD backscatter composites, one per ``time_step`` days
+    (e.g. 10-day means over a year).
 
     Parameters
     ----------
@@ -219,10 +219,10 @@ def ee_get_s1_composite(
     polarizations : sequence of str
         Any of "VV", "VH", "HH", "HV". Only scenes having all of them are used.
     orbit : {"ASCENDING", "DESCENDING", "BOTH"}
-    window_days : int or None
-        Window length in days, starting at ``start_date``; the last window is
-        cut at ``end_date``. ``None`` = one
-        composite over the whole period.
+    time_step : int or None
+        Days per step (same meaning as in ``ee_get_landsat_s2_te``), starting
+        at ``start_date``; the last step is cut at ``end_date``. ``None`` =
+        one composite over the whole period.
     reducer : {"mean", "median", "min", "max"}
     linear : bool
         Average in linear power instead of dB (only changes "mean").
@@ -242,13 +242,13 @@ def ee_get_s1_composite(
     -------
     RasterResult | str | list[str]
         ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
-        shape (n_windows, H, W, n_polarizations) uint16; ``result.times`` =
-        window start dates, ``result.channels`` = polarisations;
+        shape (n_steps, H, W, n_polarizations) uint16; ``result.times`` =
+        first day of each step, ``result.channels`` = polarisations;
         ``result.decode()`` -> float32 dB. Otherwise the GeoTIFF path(s).
     """
     product = S1Composite(
         start_date, end_date, polarizations=polarizations,
-        orbit=orbit, window_days=window_days, reducer=reducer, linear=linear,
+        orbit=orbit, time_step=time_step, reducer=reducer, linear=linear,
         relative_orbits=relative_orbits, platforms=platforms,
         mask_border_noise=mask_border_noise, db_range=db_range,
     )

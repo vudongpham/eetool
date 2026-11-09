@@ -45,7 +45,7 @@ def test_stm_validation():
 
 
 def test_s1_band_names():
-    p = S1Composite("20240101", "20241231", polarizations=["vv", "VH"], window_days=100, orbit="desc")
+    p = S1Composite("20240101", "20241231", polarizations=["vv", "VH"], time_step=100, orbit="desc")
     assert p.orbit == "DESCENDING"
     assert p.times == ["2024-01-01", "2024-04-10", "2024-07-19", "2024-10-27"]
     assert p.channels == ["VV", "VH"]
@@ -153,3 +153,45 @@ def test_public_te_per_time_files(ref_tif, tmp_path, monkeypatch):
     with pytest.raises(TypeError, match="per_time"):
         eetool.ee_get_landsat_s2_te(ref_tif, "2025-01-01", "2025-12-31", sensors="S2",
                                     per_time="times")
+
+
+def test_s1_uses_time_step():
+    p = S1Composite("20240101", "20241231", time_step=30)
+    assert len(p.times) == 13 and p.times[1] == "2024-01-31"
+    assert S1Composite("20240101", "20241231", time_step=None).times == ["2024-01-01"]
+    with pytest.raises(TypeError):
+        S1Composite("20240101", "20241231", window_days=10)
+
+
+def test_s1_readme_db_conversions(tmp_path, ref_tif):
+    """The four ways in the README give the same dB values."""
+    import numpy as np
+    import rasterio
+
+    import eetool
+    from eetool.core import Grid, RasterResult
+    from eetool.products.sentinel1 import s1_encoding
+
+    db_true = np.array([[-40.0, -15.3], [0.0, np.nan]], dtype="float32")
+    enc = s1_encoding()
+    q = enc.encode(db_true)[None, ..., None]                  # (1, 2, 2, 1)
+    grid = Grid.from_bounds((0, 0, 20, 20), "EPSG:32633", 10)
+    res = RasterResult(q, ["2024-01-01"], ["VV"], grid, enc, "s1_composite")
+
+    def s1_to_db(q, db_min=-40.0, db_max=10.0):
+        q = np.asarray(q)
+        db = q.astype("float32") * (db_max - db_min) / 65534 + db_min
+        return np.where(q == 65535, np.nan, db)
+
+    path = res.to_raster(tmp_path / "s1.tif")
+    with rasterio.open(path) as src:
+        qq = src.read()
+        factor = float(src.tags()["eetool_factor"])
+        offset = float(src.tags()["eetool_offset"])
+        from_file = np.where(qq == src.nodata, np.nan, qq / factor + offset)
+
+    ways = [res.decode()[0, ..., 0], eetool.dequantize_s1(res.data)[0, ..., 0],
+            s1_to_db(res.data)[0, ..., 0], from_file[0],
+            eetool.read_raster(path).decode()[0, ..., 0]]
+    for db in ways:
+        assert np.allclose(db, db_true, atol=0.001, equal_nan=True)

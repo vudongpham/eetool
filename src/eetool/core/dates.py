@@ -46,20 +46,20 @@ def resolve_period(start_date, end_date) -> Period:
     return Period(start, last + timedelta(days=1))
 
 
-def split_period(period: Period, window_days: int | None) -> list[Period]:
+def split_period(period: Period, time_step: int | None) -> list[Period]:
     """
-    Consecutive non-overlapping windows of ``window_days`` days starting at
+    Consecutive non-overlapping steps of ``time_step`` days starting at
     ``period.start``; the last one is cut at ``period.end`` (so it may be
     shorter). ``None`` -> a single window (the whole period).
     """
-    if window_days is None:
+    if time_step is None:
         return [period]
-    window_days = int(window_days)
-    if window_days < 1:
-        raise ValueError("window_days must be >= 1")
+    time_step = int(time_step)
+    if time_step < 1:
+        raise ValueError("time_step must be >= 1")
     out, start = [], period.start
     while start < period.end:
-        end = min(start + timedelta(days=window_days), period.end)
+        end = min(start + timedelta(days=time_step), period.end)
         out.append(Period(start, end))
         start = end
     return out
