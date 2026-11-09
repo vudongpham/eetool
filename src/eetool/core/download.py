@@ -44,7 +44,7 @@ _NON_RETRYABLE = (
 )
 
 DOWNLOAD_OPTIONS = ("res", "path_out", "layout", "tile_size", "n_workers", "max_retries",
-                    "verbose")
+                    "showProgress")
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -85,11 +85,19 @@ def _safe_tile_size(requested: int, n_bands: int, itemsize: int) -> int:
     return requested
 
 
-def _progress(done, total, t0):
+def _fmt_seconds(s: float) -> str:
+    s = int(round(s))
+    return f"{s // 3600:d}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60:02d}:{s % 60:02d}"
+
+
+def _progress(done, total, t0, width=30):
+    """One-line progress bar, redrawn in place: [#####-----]  12/40 tiles  30%  00:12<00:28"""
     elapsed = time.time() - t0
-    eta = elapsed / done * (total - done) if done else 0
-    sys.stdout.write(f"\r  tiles {done}/{total}  "
-                     f"[{elapsed:6.0f}s elapsed, ~{eta:5.0f}s left]")
+    frac = done / total if total else 1.0
+    eta = elapsed / done * (total - done) if done else 0.0
+    bar = "#" * int(round(frac * width))
+    sys.stdout.write(f"\r[eetool] [{bar:-<{width}}] {done:>{len(str(total))}}/{total} tiles "
+                     f"{frac:4.0%}  {_fmt_seconds(elapsed)}<{_fmt_seconds(eta)}")
     sys.stdout.flush()
 
 
@@ -103,7 +111,7 @@ def run(
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
-    verbose: bool = True,
+    showProgress: bool = False,
 ) -> Union[RasterResult, str, list]:
     """
     Download ``product`` on the grid of ``reference``.
@@ -112,6 +120,10 @@ def run(
     when ``path_out`` is None. Otherwise streams the tiles to disk without
     holding the whole array in memory and returns the GeoTIFF path
     (``layout="stack"``) or list of paths (``layout="per_time"``).
+
+    ``showProgress=True`` prints the grid size, scene counts and a progress
+    bar of the tiles received from Earth Engine; ``False`` (default) prints
+    nothing and skips the extra scene-count queries.
     """
     if layout not in LAYOUTS:
         raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
@@ -129,13 +141,13 @@ def run(
     tile_size = _safe_tile_size(tile_size or product.default_tile, n_bands, itemsize)
     tiles = grid.tiles(tile_size)
 
-    if verbose:
+    if showProgress:
         size_mb = grid.width * grid.height * n_bands * itemsize / 1024 ** 2
         print(f"[eetool] {product.name}: {n_t} time(s) x {n_c} channel(s), grid "
               f"{grid.width} x {grid.height} px @ {grid.res:g}, "
               f"{len(tiles)} tiles, ~{size_mb:,.0f} MB {product.encoding.dtype}")
 
-    product.prepare(grid, verbose)
+    product.prepare(grid, showProgress)
 
     tags = {"eetool_product": product.name, **product.metadata()}
 
@@ -150,19 +162,21 @@ def run(
 
     def iterate():
         t0 = time.time()
+        if showProgress:
+            _progress(0, len(tiles), t0)
         with ThreadPoolExecutor(max_workers=max(1, int(n_workers))) as pool:
             futures = [pool.submit(work, t) for t in tiles]
             try:
                 for done, fut in enumerate(as_completed(futures), start=1):
                     yield fut.result()
-                    if verbose:
+                    if showProgress:
                         _progress(done, len(tiles), t0)
             except BaseException:
                 for f in futures:
                     f.cancel()
                 raise
             finally:
-                if verbose:
+                if showProgress:
                     print()
 
     if path_out is None:
@@ -177,7 +191,7 @@ def run(
         for t, data in iterate():
             writer.write(t.row, t.col, data)
         paths = writer.close()
-    if verbose:
+    if showProgress:
         print(f"[eetool] wrote {paths[0]}" if len(paths) == 1
               else f"[eetool] wrote {len(paths)} files: {paths[0]} ... {paths[-1]}")
     return paths[0] if layout == "stack" else paths
@@ -188,7 +202,7 @@ def get(product, reference: GridLike, **kwargs):
     Get any registered product by name (or a :class:`Product` instance).
 
     Keyword arguments named in ``DOWNLOAD_OPTIONS`` (``res``, ``path_out``,
-    ``layout``, ``tile_size``, ``n_workers``, ``max_retries``, ``verbose``) control the
+    ``layout``, ``tile_size``, ``n_workers``, ``max_retries``, ``showProgress``) control the
     download; all others are passed to the product's constructor::
 
         eetool.get("s1_composite", "ref.tif", start_date="20240101",

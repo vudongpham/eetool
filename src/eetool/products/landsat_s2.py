@@ -39,6 +39,41 @@ S2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 S2_CLOUD_SCORE = "GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED"
 
 ENCODING = Encoding.scaled(10000, dtype="int16", nodata=-9999)
+DEFAULT_NODATA = -9999
+#: stored range of valid reflectance (-0.2 .. 1.6 after scaling to int16)
+_VALID_STORED_RANGE = (-2000, 16000)
+
+
+def reflectance_encoding(nodata=DEFAULT_NODATA) -> Encoding:
+    """
+    int16 reflectance * 10000 with a custom NoData value (any integer in the
+    int16 range). Valid values are kept from ever equalling NoData.
+    """
+    if isinstance(nodata, bool) or nodata is None:
+        raise TypeError("NoDataOut must be an integer, e.g. -9999")
+    try:
+        value = float(nodata)
+    except (TypeError, ValueError):
+        raise TypeError(f"NoDataOut must be an integer, got {nodata!r}") from None
+    if not np.isfinite(value) or value != int(value):
+        raise ValueError(f"NoDataOut must be a whole number (data are stored as int16), "
+                         f"got {nodata!r}")
+    info = np.iinfo(np.int16)
+    value = int(value)
+    if not info.min <= value <= info.max:
+        raise ValueError(f"NoDataOut must be in the int16 range {info.min}..{info.max}, "
+                         f"got {value}")
+    lo, hi = _VALID_STORED_RANGE
+    if lo <= value <= hi:
+        warnings.warn(
+            f"NoDataOut={value} lies inside the range of valid stored reflectance "
+            f"({lo}..{hi}); real pixels with that value will look like NoData. "
+            "A value such as -9999 or -32768 avoids this.", stacklevel=4,
+        )
+    # keep valid values off the NoData value when it is at an end of the range
+    qmin = info.min + 1 if value == info.min else info.min
+    qmax = info.max - 1 if value == info.max else info.max
+    return Encoding(dtype="int16", nodata=value, factor=10000, offset=0.0, qmin=qmin, qmax=qmax)
 TE_REDUCERS = ("mean", "median", "min", "max")
 
 
@@ -304,14 +339,15 @@ class LandsatS2TE(_LandsatS2Base):
     """
     Temporal encoding: one cloud-masked composite of Landsat and/or
     Sentinel-2 SR per ``time_step`` days. Steps without any clear
-    observation are NoData.
+    observation are NoData (``NoDataOut``, default -9999).
     """
 
     name = "landsat_s2_te"
 
     def __init__(self, start_date, end_date, time_step: int = 7, reducer: str = "mean",
-                 **kwargs):
+                 NoDataOut: int = DEFAULT_NODATA, **kwargs):
         super().__init__(start_date, end_date, **kwargs)
+        self.encoding = reflectance_encoding(NoDataOut)
         if time_step is None or int(time_step) < 1:
             raise ValueError("time_step must be an integer >= 1 (days)")
         if reducer not in TE_REDUCERS:
@@ -378,7 +414,7 @@ _COMMON_DOC = """    sensors : sequence of str
     resample : {None, "bilinear", "bicubic"}
         Resampling of optical bands when warping scenes to the grid
         (None = nearest neighbour).
-    res, path_out, layout, tile_size, n_workers, max_retries, verbose
+    res, path_out, layout, tile_size, n_workers, max_retries, showProgress
         Options shared by every eetool function — see :func:`eetool.get`."""
 
 
@@ -401,7 +437,7 @@ def ee_get_landsat_s2_stm(
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
-    verbose: bool = True,
+    showProgress: bool = False,
 ):
     product = LandsatS2STM(
         start_date, end_date, percentiles=percentiles, sensors=sensors, bands=bands,
@@ -410,7 +446,7 @@ def ee_get_landsat_s2_stm(
     )
     return run(product, reference, res=res, path_out=path_out, layout=layout,
                tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
-               verbose=verbose)
+               showProgress=showProgress)
 
 
 ee_get_landsat_s2_stm.__doc__ = """
@@ -453,6 +489,7 @@ def ee_get_landsat_s2_te(
     s2_cs_threshold: float = 0.6,
     mask_snow: bool = True,
     resample: str | None = None,
+    NoDataOut: int = DEFAULT_NODATA,
     *,
     res: float | None = None,
     path_out=None,
@@ -460,16 +497,17 @@ def ee_get_landsat_s2_te(
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
-    verbose: bool = True,
+    showProgress: bool = False,
 ):
     product = LandsatS2TE(
-        start_date, end_date, time_step=time_step, reducer=reducer, sensors=sensors,
+        start_date, end_date, time_step=time_step, reducer=reducer, NoDataOut=NoDataOut,
+        sensors=sensors,
         bands=bands, max_scene_cloud=max_scene_cloud, s2_nir=s2_nir,
         s2_cs_threshold=s2_cs_threshold, mask_snow=mask_snow, resample=resample,
     )
     return run(product, reference, res=res, path_out=path_out, layout=layout,
                tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
-               verbose=verbose)
+               showProgress=showProgress)
 
 
 ee_get_landsat_s2_te.__doc__ = """
@@ -480,7 +518,7 @@ ee_get_landsat_s2_te.__doc__ = """
     last step is cut at ``end_date`` and may be shorter). Within each step all
     clear observations are combined with ``reducer`` (default mean). Pixels
     with no clear observation in a step — clouds, shadow, snow, saturation,
-    or no scene at all in that step — are NoData (-9999).
+    or no scene at all in that step — are NoData (``NoDataOut``, default -9999).
 
     Parameters
     ----------
@@ -494,6 +532,11 @@ ee_get_landsat_s2_te.__doc__ = """
         Length of each step in days (e.g. 7 = weekly composites).
     reducer : {"mean", "median", "min", "max"}
         How clear observations within a step are combined.
+    NoDataOut : int
+        Value written where there is no data (default -9999). Any integer in
+        the int16 range; values inside the valid reflectance range
+        (-2000..16000 stored) trigger a warning because they can clash with
+        real pixels.
 """ + _COMMON_DOC + """
 
     Returns
@@ -501,6 +544,6 @@ ee_get_landsat_s2_te.__doc__ = """
     RasterResult | str | list[str]
         ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
         shape (n_steps, H, W, n_bands), int16 = reflectance * 10000,
-        NoData = -9999; ``result.times`` = first day of each step,
+        NoData = ``NoDataOut`` (``result.nodata``); ``result.times`` = first day of each step,
         ``result.channels`` = bands. Otherwise the GeoTIFF path(s).
 """

@@ -12,6 +12,7 @@ ref = "reference.tif"  # raster (.tif) or vector (.gpkg, .shp, ...); defines ext
 #    wherever a week has no clear observation
 te = ee_get_landsat_s2_te(
     ref, start_date="20150101", end_date="20151231", time_step=7, sensors=["L8", "L9"],
+    showProgress=True,                # progress bar of the tiles arriving from Earth Engine
 )
 print(te)                       # RasterResult(shape=(53, H, W, 6) (time, H, W, channel), ...)
 print(te.times[:2], te.channels)

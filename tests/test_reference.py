@@ -87,7 +87,7 @@ def test_run_with_vector_reference(aoi, tmp_path, monkeypatch):
     monkeypatch.setattr(ee.data, "computePixels", compute)
     path = tmp_path / "aoi.gpkg"
     aoi.to_file(path)
-    res = run(One(), path, verbose=False)            # res=None -> product default 100 m
+    res = run(One(), path, showProgress=False)            # res=None -> product default 100 m
     assert res.shape == (2, 100, 99, 1) and res.grid.res == 100   # (time, H, W, channel)
     assert res.transform.c == 500100 and res.transform.f == 4999990
     assert (res.data == 1).all()

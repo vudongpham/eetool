@@ -15,6 +15,30 @@ georeference it.
 | `ee_get_landsat_s2_stm` | one per percentile (`p10`, `p50`, ...) | spectral bands |
 | `ee_get_annual_embedding` | 1 (the year) | `A00` ... `A63` |
 
+## Sensors
+
+| Name in `sensors=` | Satellite | Earth Engine collection | Data from |
+|---|---|---|---|
+| `"L4"` | Landsat 4 TM | `LANDSAT/LT04/C02/T1_L2` | 1982 to 1993 |
+| `"L5"` | Landsat 5 TM | `LANDSAT/LT05/C02/T1_L2` | 1984 to 2012 |
+| `"L7"` | Landsat 7 ETM+ | `LANDSAT/LE07/C02/T1_L2` | 1999 onwards |
+| `"L8"` | Landsat 8 OLI | `LANDSAT/LC08/C02/T1_L2` | 2013 onwards |
+| `"L9"` | Landsat 9 OLI-2 | `LANDSAT/LC09/C02/T1_L2` | 2021 onwards |
+| `"S2A"` | Sentinel-2A MSI | `COPERNICUS/S2_SR_HARMONIZED` | 2017 onwards (L2A) |
+| `"S2B"` | Sentinel-2B MSI | `COPERNICUS/S2_SR_HARMONIZED` | 2017 onwards (L2A) |
+| `"S2C"` | Sentinel-2C MSI | `COPERNICUS/S2_SR_HARMONIZED` | 2025 onwards |
+| `"S2"` | every Sentinel-2 platform (A, B, C, and later ones) | `COPERNICUS/S2_SR_HARMONIZED` | |
+
+These work in `ee_get_landsat_s2_stm` and `ee_get_landsat_s2_te`, and can be
+mixed, e.g. `sensors=["L8", "L9", "S2"]`. Names are not case-sensitive, and
+`"Landsat-8"` or `"Sentinel-2B"` also work. Every sensor gives the same six bands:
+`blue`, `green`, `red`, `nir`, `swir1`, `swir2`.
+
+| Other data | Earth Engine collection | Function |
+|---|---|---|
+| Sentinel-1A / 1B / 1C GRD (`platforms=["A", "C"]`) | `COPERNICUS/S1_GRD` | `ee_get_s1_composite` |
+| Google Satellite Embedding | `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` | `ee_get_annual_embedding` |
+
 ## Install
 
 ```bash
@@ -58,17 +82,20 @@ eetool.initialize(project="my-gcp-project")
 
 ref = "reference.tif"   # or a vector: "aoi.gpkg", "fields.shp", ... (see "Reference")
 
-# Landsat 8/9 weekly mean composites for 2015
+# Landsat 8/9 weekly mean composites for 2015, with a progress bar
 te = ee_get_landsat_s2_te(ref, start_date="20150101", end_date="20151231",
-                               time_step=7, sensors=["L8", "L9"])
-te.data.shape        # (53, H, W, 6)   int16, NoData = -9999
+                          time_step=7, sensors=["L8", "L9"], showProgress=True)
+# [eetool] landsat_s2_te: 53 time(s) x 6 channel(s), grid 1000 x 800 px @ 30, 20 tiles, ...
+# [eetool] scenes intersecting the extent: L8=46
+# [eetool] [##############----------------]  9/20 tiles  45%  00:21<00:26
+te.data.shape        # (53, H, W, 6)   int16, NoData = -9999 (change with NoDataOut=)
 te.times             # ['2015-01-01', '2015-01-08', ...]
 te.channels          # ['blue', 'green', 'red', 'nir', 'swir1', 'swir2']
 x = te.decode()      # float32 reflectance, NaN where there is no clear observation
 
 # Landsat 8/9 percentiles for 2024
 stm = ee_get_landsat_s2_stm(ref, "20240101", "20241231",
-                                 percentiles=[0.1, 0.5, 0.9], sensors=["L8", "L9"])
+                            percentiles=[0.1, 0.5, 0.9], sensors=["L8", "L9"])
 stm.data.shape       # (3, H, W, 6)    one time step per percentile
 stm.times            # ['p10', 'p50', 'p90']
 
@@ -78,7 +105,7 @@ emb.data.shape       # (1, H, W, 64)
 
 # Sentinel-1 VV + VH, 10-day means
 s1 = ee_get_s1_composite(ref, "20240101", "20241231",
-                              polarizations=["VV", "VH"], window_days=10)
+                         polarizations=["VV", "VH"], window_days=10)
 s1.data.shape        # (37, H, W, 2)
 ```
 
@@ -139,7 +166,7 @@ res.to_raster("te.tif", layout="per_time")    # -> ["te_2015-01-01.tif", ...]
 # or stream straight to disk while downloading, without holding the whole
 # array in memory (use this for large areas or long time series)
 ee_get_landsat_s2_te(ref, "20150101", "20151231", time_step=7,
-                          sensors=["L8", "L9"], path_out="te.tif", layout="per_time")
+                     sensors=["L8", "L9"], path_out="te.tif", layout="per_time")
 
 back = eetool.read_raster("te.tif")                          # stacked file
 back = eetool.read_raster(sorted(glob.glob("te_*.tif")))     # per-time files
@@ -159,7 +186,7 @@ For a real 4-D file format, use `res.to_xarray()` and then `.to_zarr()` or `.to_
 | `tile_size` | `None` | Tile width/height in pixels per request (`None` = 256) |
 | `n_workers` | `4` | Number of tiles downloaded in parallel |
 | `max_retries` | `5` | Retries per tile when Earth Engine fails |
-| `verbose` | `True` | Print scene counts and progress |
+| `showProgress` | `False` | `True` = print the grid size, scene counts and a progress bar while the data arrive from Earth Engine |
 
 ### Reference: raster or vector
 
@@ -204,7 +231,7 @@ ee_get_landsat_s2_stm(
     s2_cs_threshold=0.6,
     mask_snow=True,
     resample=None,
-    res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, verbose=True,
+    res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, showProgress=False,
 )
 ```
 
@@ -244,26 +271,28 @@ ee_get_landsat_s2_te(
     s2_cs_threshold=0.6,
     mask_snow=True,
     resample=None,
-    res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, verbose=True,
+    NoDataOut=-9999,
+    res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, showProgress=False,
 )
 ```
 
 | Argument | Meaning |
 |---|---|
+| `NoDataOut` | Value written where there is no data. Any integer from -32768 to 32767; values from -2000 to 16000 give a warning because real reflectance can have them |
 | `time_step` | Length of each step in days. Steps start at `start_date`; the last one stops at `end_date` and can be shorter |
 | `reducer` | How clear observations inside a step are combined: `"mean"`, `"median"`, `"min"` or `"max"` |
 | others | Same as `ee_get_landsat_s2_stm` |
 
-A pixel gets NoData (-9999) in a step when it has no clear observation there:
+A pixel gets NoData (`NoDataOut`, default -9999) in a step when it has no clear observation there:
 it was cloudy, shadowed, snow-covered or saturated in every scene, or there
 was no scene at all in that step (then the whole step is NoData).
 
 **Output:** `(n_steps, H, W, n_bands)`, int16, reflectance × 10000,
-NoData = -9999. `res.times` holds the first day of each step.
+NoData = `NoDataOut` (also in `res.nodata`). `res.times` holds the first day of each step.
 
 ```python
 res = ee_get_landsat_s2_te(ref, "20150101", "20151231", time_step=7,
-                                sensors=["L8", "L9"], bands=["red", "nir"])
+                           sensors=["L8", "L9"], bands=["red", "nir"])
 x = res.decode()                      # (53, H, W, 2) float32, NaN = no data
 ndvi = (x[..., 1] - x[..., 0]) / (x[..., 1] + x[..., 0])   # (53, H, W)
 ```
@@ -275,7 +304,7 @@ ee_get_annual_embedding(
     reference,
     year,
     bands=None,
-    res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, verbose=True,
+    res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, showProgress=False,
 )
 ```
 
@@ -307,7 +336,7 @@ ee_get_s1_composite(
     platforms=None,
     mask_border_noise=True,
     db_range=(-40.0, 10.0),
-    res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, verbose=True,
+    res=None, path_out=None, layout="stack", tile_size=None, n_workers=4, max_retries=5, showProgress=False,
 )
 ```
 

@@ -69,7 +69,7 @@ def fake_compute(monkeypatch):
 
 
 def test_in_memory_is_4d(ref_tif, fake_compute):
-    res = run(FakeProduct(), ref_tif, tile_size=32, verbose=False)
+    res = run(FakeProduct(), ref_tif, tile_size=32, showProgress=False)
     assert isinstance(res, eetool.RasterResult)
     assert res.shape == (3, 70, 100, 2)            # (time, H, W, channel)
     assert res.times == TIMES and res.channels == CHANNELS
@@ -79,7 +79,7 @@ def test_in_memory_is_4d(ref_tif, fake_compute):
 
 
 def test_sel_and_to_bands(ref_tif, fake_compute):
-    res = run(FakeProduct(), ref_tif, verbose=False)
+    res = run(FakeProduct(), ref_tif, showProgress=False)
     sub = res.sel(time="2024-01-08", channel=["b"])
     assert sub.shape == (1, 70, 100, 1) and sub.times == ["2024-01-08"]
     assert np.array_equal(sub.data[0, ..., 0], expected()[1, ..., 1])
@@ -93,7 +93,7 @@ def test_sel_and_to_bands(ref_tif, fake_compute):
 
 def test_stream_stack(ref_tif, fake_compute, tmp_path):
     out = run(FakeProduct(), ref_tif, path_out=tmp_path / "x" / "o.tif",
-              tile_size=32, n_workers=3, verbose=False)
+              tile_size=32, n_workers=3, showProgress=False)
     assert out == str(tmp_path / "x" / "o.tif")
     with rasterio.open(out) as src:
         assert src.count == 6
@@ -107,7 +107,7 @@ def test_stream_stack(ref_tif, fake_compute, tmp_path):
 
 def test_stream_per_time(ref_tif, fake_compute, tmp_path):
     out = run(FakeProduct(), ref_tif, path_out=tmp_path / "s1.tif", layout="per_time",
-              tile_size=32, verbose=False)
+              tile_size=32, showProgress=False)
     assert [p.rsplit("/", 1)[1] for p in out] == [
         "s1_2024-01-01.tif", "s1_2024-01-08.tif", "s1_2024-01-15.tif"]
     with rasterio.open(out[1]) as src:
@@ -119,7 +119,7 @@ def test_stream_per_time(ref_tif, fake_compute, tmp_path):
 
 
 def test_result_to_raster_matches_stream(ref_tif, fake_compute, tmp_path):
-    res = run(FakeProduct(), ref_tif, verbose=False)
+    res = run(FakeProduct(), ref_tif, showProgress=False)
     path = res.to_raster(tmp_path / "r.tif")
     with rasterio.open(path) as src:
         assert np.array_equal(src.read(), res.to_bands())
@@ -137,7 +137,7 @@ def test_read_plain_geotiff(ref_tif):
 
 def test_to_xarray(ref_tif, fake_compute):
     pytest.importorskip("xarray")
-    da = run(FakeProduct(), ref_tif, verbose=False).to_xarray()
+    da = run(FakeProduct(), ref_tif, showProgress=False).to_xarray()
     assert da.dims == ("time", "y", "x", "channel")
     assert list(da.time.values) == TIMES
     assert float(da.x[0]) == 500015 and float(da.y[0]) == 4999985
@@ -151,7 +151,7 @@ def test_failure_leaves_no_file(ref_tif, monkeypatch, tmp_path):
     for layout in ("stack", "per_time"):
         with pytest.raises(RuntimeError, match="did not match"):
             run(FakeProduct(), ref_tif, path_out=tmp_path / "o.tif", layout=layout,
-                verbose=False)
+                showProgress=False)
     assert list(tmp_path.glob("o*")) == []
 
 
@@ -168,7 +168,7 @@ def test_retry_transient(ref_tif, monkeypatch):
 
     monkeypatch.setattr(ee.data, "computePixels", flaky)
     monkeypatch.setattr("time.sleep", lambda s: None)
-    res = run(FakeProduct(), ref_tif, n_workers=1, verbose=False)
+    res = run(FakeProduct(), ref_tif, n_workers=1, showProgress=False)
     assert (res.data == 1).all()
 
 
@@ -184,3 +184,13 @@ def test_download_by_name_kwargs_split():
     assert eetool.download is eetool.get
     with pytest.raises(ValueError):
         run(FakeProduct(), "ref.tif", layout="netcdf")
+
+
+def test_show_progress(ref_tif, fake_compute, capsys):
+    run(FakeProduct(), ref_tif, tile_size=32)                 # default: silent
+    assert capsys.readouterr().out == ""
+    run(FakeProduct(), ref_tif, tile_size=32, showProgress=True)
+    out = capsys.readouterr().out
+    assert "3 time(s) x 2 channel(s)" in out
+    assert "12/12 tiles 100%" in out and "[" + "#" * 30 + "]" in out
+    assert out.count("\r") == 13                              # 0/12 .. 12/12, redrawn in place
