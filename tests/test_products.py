@@ -26,7 +26,9 @@ def test_stm_band_names():
     p = LandsatS2STM("20240101", "20241231", percentiles=[0.9, 0.025], sensors=["L8"],
                      bands=["red", "nir"])
     assert percentile_label(0.025) == "p2.5"
-    assert p.band_names == ["p90_red", "p90_nir", "p2.5_red", "p2.5_nir"]
+    assert p.times == ["2024-01-01"]
+    assert p.channels == ["p90_red", "p90_nir", "p2.5_red", "p2.5_nir"]
+    assert p.band_names == p.channels       # one time step -> plain channel names
     assert p.encoding.dtype == "int16"
 
 
@@ -42,8 +44,10 @@ def test_stm_validation():
 def test_s1_band_names():
     p = S1Composite("20240101", "20241231", polarizations=["vv", "VH"], window_days=100, orbit="desc")
     assert p.orbit == "DESCENDING"
-    assert p.band_names == ["VV_2024-01-01", "VV_2024-04-10", "VV_2024-07-19", "VV_2024-10-27",
-                            "VH_2024-01-01", "VH_2024-04-10", "VH_2024-07-19", "VH_2024-10-27"]
+    assert p.times == ["2024-01-01", "2024-04-10", "2024-07-19", "2024-10-27"]
+    assert p.channels == ["VV", "VH"]
+    assert p.shape == (4, 2)
+    assert p.band_names[:3] == ["VV_2024-01-01", "VH_2024-01-01", "VV_2024-04-10"]
     assert S1Composite("20240101", "20241231", platforms=["S1A", "Sentinel-1C", "b"]).platforms == ["A", "C", "B"]
     with pytest.raises(ValueError):
         S1Composite("20240101", "20241231", polarizations=["XX"])
@@ -51,18 +55,17 @@ def test_s1_band_names():
 
 def test_embedding_bands():
     p = eetool.AnnualEmbedding(2024)
-    assert len(p.band_names) == 64 and p.band_names[0] == "A00"
+    assert p.shape == (1, 64) and p.channels[0] == "A00" and p.times == ["2024"]
     assert p.encoding.nodata == 65535
 
 
 def test_te_steps_and_band_names():
     p = LandsatS2TE(start_date="20150101", end_date="20151231", time_step=7,
                     sensors=["L8", "L9"], bands=["red", "nir"])
-    assert len(p.windows) == 53            # 52 full weeks + 31 Dec
+    assert p.shape == (53, 2)              # 52 full weeks + 31 Dec
     assert p.windows[-1].days == 1
-    assert p.band_names[:4] == ["red_2015-01-01", "nir_2015-01-01",
-                                "red_2015-01-08", "nir_2015-01-08"]
-    assert len(p.band_names) == 53 * 2
+    assert p.times[:2] == ["2015-01-01", "2015-01-08"] and p.times[-1] == "2015-12-31"
+    assert p.channels == ["red", "nir"]
     assert p.encoding.nodata == -9999
     with pytest.raises(ValueError):
         LandsatS2TE("20150101", "20151231", time_step=0)

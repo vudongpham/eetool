@@ -1,5 +1,8 @@
 """
-eetool — download Google Earth Engine data onto your own pixel grid.
+eetool — Google Earth Engine data as numpy arrays on your own pixel grid.
+
+Every function returns a :class:`RasterResult` whose ``data`` is a 4-D array
+(time, height, width, channel), or streams it to GeoTIFF with ``path_out``.
 
     import eetool
     from eetool import (ee_download_landsat_s2_stm, ee_download_landsat_s2_te,
@@ -8,6 +11,7 @@ eetool — download Google Earth Engine data onto your own pixel grid.
     eetool.initialize(project="my-gcp-project")
     stm = ee_download_landsat_s2_stm("ref.tif", "20240101", "20241231",
                                      percentiles=[0.1, 0.5, 0.9], sensors=["L8", "L9"])
+    stm.data.shape            # (1, H, W, 18): (time, H, W, channel)
     stm.to_raster("stm_2024.tif")
 """
 
@@ -16,12 +20,14 @@ from __future__ import annotations
 from .core import (
     DOWNLOAD_OPTIONS,
     Encoding,
+    LAYOUTS,
     Grid,
     Product,
     RasterResult,
     download,
     get_product,
     list_products,
+    read_raster,
     register,
     write_raster,
 )
@@ -60,9 +66,9 @@ def initialize(project: str | None = None, high_volume: bool = True, **kwargs) -
 
 
 __all__ = [
-    "COMMON_BANDS", "DOWNLOAD_OPTIONS", "AnnualEmbedding", "Encoding", "Grid",
+    "COMMON_BANDS", "DOWNLOAD_OPTIONS", "LAYOUTS", "AnnualEmbedding", "Encoding", "Grid",
     "LandsatS2STM", "LandsatS2TE", "Product", "RasterResult", "S1Composite", "__version__",
     "dequantize_embedding", "dequantize_s1", "download", "ee_download_annual_embedding",
     "ee_download_landsat_s2_stm", "ee_download_landsat_s2_te", "ee_download_s1_composite", "get_product", "initialize",
-    "list_products", "quantize_embedding", "quantize_s1", "register", "write_raster",
+    "list_products", "quantize_embedding", "read_raster", "quantize_s1", "register", "write_raster",
 ]

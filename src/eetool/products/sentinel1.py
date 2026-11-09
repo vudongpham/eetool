@@ -1,6 +1,6 @@
 """
 Sentinel-1 GRD (COPERNICUS/S1_GRD, IW mode, backscatter in dB) composites
-over consecutive time windows, one band per polarisation and window.
+over consecutive time windows: (window, H, W, polarisation).
 
 Storage: uint16 linear mapping of ``db_range`` (default -40..10 dB) onto
 0..65534, NoData = 65535 (~0.0008 dB step). ``RasterResult.decode()`` or
@@ -100,8 +100,13 @@ class S1Composite(Product):
         self.encoding = s1_encoding(self.db_range)
 
     @property
-    def band_names(self) -> list[str]:
-        return [f"{p}_{w.start.isoformat()}" for p in self.polarizations for w in self.windows]
+    def times(self) -> list[str]:
+        """Start date (ISO) of every window."""
+        return [w.start.isoformat() for w in self.windows]
+
+    @property
+    def channels(self) -> list[str]:
+        return list(self.polarizations)
 
     def metadata(self) -> dict:
         return {
@@ -158,8 +163,8 @@ class S1Composite(Product):
                      .updateMask(ee.Image.constant(0)))
             per_window.append(ee.Image(ee.Algorithms.If(
                 sub.size().gt(0), reduced.select(self.polarizations, names), empty)))
-        # window-major -> polarisation-major band order
-        return ee.Image.cat(per_window).select(self.band_names)
+        # time-major: all polarisations of window 0, then window 1, ...
+        return ee.Image.cat(per_window)
 
     def prepare(self, grid, verbose=True):
         if not verbose:
@@ -193,6 +198,7 @@ def ee_download_s1_composite(
     *,
     res: float | None = None,
     path_out=None,
+    layout: str = "stack",
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
@@ -226,17 +232,17 @@ def ee_download_s1_composite(
         Mask values below -30 dB (swath-edge noise) in every scene.
     db_range : (float, float)
         dB range mapped onto uint16 for storage.
-    res, path_out, tile_size, n_workers, max_retries, verbose
-        Download options shared by all eetool functions (default res: 10 m);
+    res, path_out, layout, tile_size, n_workers, max_retries, verbose
+        Options shared by all eetool functions (default res: 10 m);
         see :func:`eetool.download`.
 
     Returns
     -------
-    RasterResult | str
-        ``path_out is None`` -> :class:`eetool.RasterResult`
-        (n_polarizations * n_windows, H, W) uint16, bands named
-        ``"VV_2024-01-01"``, ``"VV_2024-01-11"``, ... (polarisation-major);
-        ``result.decode()`` -> float32 dB. Otherwise the GeoTIFF path.
+    RasterResult | str | list[str]
+        ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
+        shape (n_windows, H, W, n_polarizations) uint16; ``result.times`` =
+        window start dates, ``result.channels`` = polarisations;
+        ``result.decode()`` -> float32 dB. Otherwise the GeoTIFF path(s).
     """
     product = S1Composite(
         start_date, end_date, polarizations=polarizations,
@@ -244,5 +250,6 @@ def ee_download_s1_composite(
         relative_orbits=relative_orbits, platforms=platforms,
         mask_border_noise=mask_border_noise, db_range=db_range,
     )
-    return run(product, raster_ref_image, res=res, path_out=path_out, tile_size=tile_size,
-               n_workers=n_workers, max_retries=max_retries, verbose=verbose)
+    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+               tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
+               verbose=verbose)

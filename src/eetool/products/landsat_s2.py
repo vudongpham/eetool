@@ -272,7 +272,12 @@ class LandsatS2STM(_LandsatS2Base):
         super().__init__(start_date, end_date, **kwargs)
 
     @property
-    def band_names(self) -> list[str]:
+    def times(self) -> list[str]:
+        """One time step: the period, labelled by its first day."""
+        return [self.period.start.isoformat()]
+
+    @property
+    def channels(self) -> list[str]:
         return [f"{percentile_label(p)}_{b}" for p in self.percentiles for b in self.bands]
 
     def metadata(self) -> dict:
@@ -315,26 +320,26 @@ class LandsatS2TE(_LandsatS2Base):
         self.windows = split_period(self.period, self.time_step)
 
     @property
-    def dates(self) -> list[str]:
+    def times(self) -> list[str]:
         """First day of every time step (ISO)."""
         return [w.start.isoformat() for w in self.windows]
 
     @property
-    def band_names(self) -> list[str]:
-        # time-major: all bands of step 0, then all bands of step 1, ...
-        return [f"{b}_{d}" for d in self.dates for b in self.bands]
+    def channels(self) -> list[str]:
+        return list(self.bands)
 
     def metadata(self) -> dict:
         return {**super().metadata(), "time_step_days": self.time_step,
                 "reducer": self.reducer, "n_steps": len(self.windows),
-                "band_order": "time-major"}
+}
 
     def build_image(self, region):
         import ee
 
         coll = self.collection(region)
         steps = []
-        for w, d in zip(self.windows, self.dates):
+        # time-major: all bands of step 0, then all bands of step 1, ...
+        for w, d in zip(self.windows, self.times):
             sub = coll.filterDate(w.start.isoformat(), w.end.isoformat())
             names = [f"{b}_{d}" for b in self.bands]
             reduced = getattr(sub, self.reducer)().select(self.bands, names)
@@ -372,9 +377,8 @@ _COMMON_DOC = """    sensors : sequence of str
     resample : {None, "bilinear", "bicubic"}
         Resampling of optical bands when warping scenes to the grid
         (None = nearest neighbour).
-    res, path_out, tile_size, n_workers, max_retries, verbose
-        Download options, identical for every eetool function — see
-        :func:`eetool.download`."""
+    res, path_out, layout, tile_size, n_workers, max_retries, verbose
+        Options shared by every eetool function — see :func:`eetool.download`."""
 
 
 def ee_download_landsat_s2_stm(
@@ -392,6 +396,7 @@ def ee_download_landsat_s2_stm(
     *,
     res: float | None = None,
     path_out=None,
+    layout: str = "stack",
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
@@ -402,8 +407,9 @@ def ee_download_landsat_s2_stm(
         max_scene_cloud=max_scene_cloud, s2_nir=s2_nir, s2_cs_threshold=s2_cs_threshold,
         mask_snow=mask_snow, resample=resample,
     )
-    return run(product, raster_ref_image, res=res, path_out=path_out, tile_size=tile_size,
-               n_workers=n_workers, max_retries=max_retries, verbose=verbose)
+    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+               tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
+               verbose=verbose)
 
 
 ee_download_landsat_s2_stm.__doc__ = """
@@ -424,11 +430,11 @@ ee_download_landsat_s2_stm.__doc__ = """
 
     Returns
     -------
-    RasterResult | str
+    RasterResult | str | list[str]
         ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
-        shape (n_percentiles * n_bands, H, W), int16 = reflectance * 10000,
-        NoData = -9999, bands named ``"p10_blue"``, ``"p10_green"``, ...
-        (percentile-major). Otherwise the GeoTIFF path.
+        shape (1, H, W, n_percentiles * n_bands), int16 = reflectance * 10000,
+        NoData = -9999; channels ``"p10_blue"``, ``"p10_green"``, ...
+        (percentile-major). Otherwise the GeoTIFF path(s).
 """
 
 
@@ -448,6 +454,7 @@ def ee_download_landsat_s2_te(
     *,
     res: float | None = None,
     path_out=None,
+    layout: str = "stack",
     tile_size: int | None = None,
     n_workers: int = 4,
     max_retries: int = 5,
@@ -458,8 +465,9 @@ def ee_download_landsat_s2_te(
         bands=bands, max_scene_cloud=max_scene_cloud, s2_nir=s2_nir,
         s2_cs_threshold=s2_cs_threshold, mask_snow=mask_snow, resample=resample,
     )
-    return run(product, raster_ref_image, res=res, path_out=path_out, tile_size=tile_size,
-               n_workers=n_workers, max_retries=max_retries, verbose=verbose)
+    return run(product, raster_ref_image, res=res, path_out=path_out, layout=layout,
+               tile_size=tile_size, n_workers=n_workers, max_retries=max_retries,
+               verbose=verbose)
 
 
 ee_download_landsat_s2_te.__doc__ = """
@@ -487,11 +495,9 @@ ee_download_landsat_s2_te.__doc__ = """
 
     Returns
     -------
-    RasterResult | str
+    RasterResult | str | list[str]
         ``path_out is None`` -> :class:`eetool.RasterResult` with ``data`` of
-        shape (n_steps * n_bands, H, W), int16 = reflectance * 10000,
-        NoData = -9999, bands named ``"blue_2015-01-01"``, ``"green_2015-01-01"``,
-        ..., ``"blue_2015-01-08"``, ... (time-major, so
-        ``data.reshape(n_steps, n_bands, H, W)`` gives a (T, C, H, W) cube).
-        Otherwise the GeoTIFF path.
+        shape (n_steps, H, W, n_bands), int16 = reflectance * 10000,
+        NoData = -9999; ``result.times`` = first day of each step,
+        ``result.channels`` = bands. Otherwise the GeoTIFF path(s).
 """
